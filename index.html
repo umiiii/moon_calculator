@@ -264,14 +264,22 @@
 </head>
 <body>
     <div class="container">
-        <h1>🔄 AMM Pool 价格计算器</h1>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+            <h1 style="margin: 0;">🔄 AMM Pool 价格计算器</h1>
+            <a href="https://twitter.com/aezaumi" target="_blank" rel="noopener noreferrer" style="display: flex; align-items: center; gap: 8px; padding: 10px 20px; background: linear-gradient(135deg, #1DA1F2 0%, #0d8bd9 100%); color: white; text-decoration: none; border-radius: 25px; font-weight: 600; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 4px 15px rgba(29, 161, 242, 0.3);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(29, 161, 242, 0.4)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 15px rgba(29, 161, 242, 0.3)';">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+                    <path d="M23.643 4.937c-.835.37-1.732.62-2.675.733.962-.576 1.7-1.49 2.048-2.578-.9.534-1.897.922-2.958 1.13-.85-.904-2.06-1.47-3.4-1.47-2.572 0-4.658 2.086-4.658 4.66 0 .364.042.718.12 1.06-3.873-.195-7.304-2.05-9.602-4.868-.4.69-.63 1.49-.63 2.342 0 1.616.823 3.043 2.072 3.878-.764-.025-1.482-.234-2.11-.583v.06c0 2.257 1.605 4.14 3.737 4.568-.392.106-.803.162-1.227.162-.3 0-.593-.028-.877-.082.593 1.85 2.313 3.198 4.352 3.234-1.595 1.25-3.604 1.995-5.786 1.995-.376 0-.747-.022-1.112-.065 2.062 1.323 4.51 2.093 7.14 2.093 8.57 0 13.255-7.098 13.255-13.254 0-.2-.005-.402-.014-.602.91-.658 1.7-1.477 2.323-2.41z"/>
+                </svg>
+                Follow @aezaumi
+            </a>
+        </div>
 
         <!-- 配置卡片 -->
         <div class="card">
             <h2 style="margin-bottom: 20px;">⚙️ 配置</h2>
             <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 20px; margin-bottom: 20px;">
                 <div class="input-group" style="margin-bottom: 0;">
-                    <label for="rpcUrl">RPC 端点</label>
+                    <label for="rpcUrl">RPC</label>
                     <input type="text" id="rpcUrl" value="https://rpc-bsc.48.club" placeholder="输入RPC URL">
                 </div>
                 <div class="input-group" style="margin-bottom: 0;">
@@ -288,9 +296,9 @@
             <p style="margin-top: 15px;">正在加载池子信息...</p>
         </div>
 
-        <!-- 池子信息卡片 -->
+        <!-- 池子信息与价格计算 -->
         <div id="poolInfo" class="card hidden">
-            <h2 style="margin-bottom: 20px;">📊 池子信息</h2>
+            <h2 style="margin-bottom: 20px;">📊 池子信息 & 价格计算</h2>
             
             <div class="info-grid" style="display: none;">
                 <div class="info-box">
@@ -318,64 +326,58 @@
                     <p id="reserve1Raw" style="font-size: 10px; color: #888; margin-top: 5px;">-</p>
                 </div>
             </div>
-
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-top: 20px;">
-                <div class="price-display">
-                    <h2>当前价格</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                <div class="input-group">
+                    <h2>Price</h2>
                     <div class="price" id="currentPrice">-</div>
-                    <div class="small-text">Reverse Price: <span id="inversePrice" style="font-size: 12px; color: #ffffff">- </span></div>
+                    <div class="price" id="currentPrice"><span id="inversePrice">- </span></div>
+                    <div class="price" id="token0UsdPrice">-</div>
                 </div>
-                
-                <div class="price-display" style="background: linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%);">
-                    <h2>Token0 美元价格</h2>
-                    <div class="price" id="token0UsdPrice" style="color: rgba(255,255,255,0.9); ">-</div>
-                </div>
-                
-                <div class="price-display" style="background: linear-gradient(135deg, #a29bfe 0%, #6c5ce7 100%);">
-                    <h2>总市值 (FDV)</h2>
-                    <div class="price" id="marketCapUnits">-</div>
+                <div class="input-group">
+                    <h2>FDV</h2>
+                    <div><div class="price" id="marketCapUnits">-</div> <div id="token0TotalMarketCap" style="display: none;">-</div></div>
                     <p id="token0TotalSupply" style="font-size: 16px;">-</p>
-                    <div id="token0TotalMarketCap" class="small-text" style="color: rgba(255,255,255,0.9); margin-top: 8px; font-weight: 600;">-</div>
+                    
                 </div>
             </div>
-        </div>
 
-        <!-- 计算卡片 -->
-        <div id="calculator" class="card hidden">
-            <h2 style="margin-bottom: 20px;">🧮 价格与市值计算器</h2>
-            
-            <!-- 目标价格计算 -->
-            <div id="priceTab">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                    <div class="input-group">
-                        <label for="targetPrice">目标价格 (Token0 价格，以 Token1 计价)</label>
+            <!-- 目标价格与市值计算 -->
+            <div id="calculator" style="border-top: 1px solid #e0e0e0; padding-top: 15px; margin-top: 15px;">
+                <div id="priceTab">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 10px;">
+                    <div class="input-group" style="margin-bottom: 0;">
+                        <label for="targetPrice" style="font-size: 14px;">目标价格</label>
                         <input type="number" id="targetPrice" placeholder="输入目标价格" oninput="onTargetPriceChange()" step="any">
                         <div class="small-text">当前: <span id="currentPriceHint">-</span></div>
                     </div>
-                    <div class="input-group">
-                        <label for="targetMarketCap">目标市值 (USD)</label>
+                    <div class="input-group" style="margin-bottom: 0;">
+                        <label for="targetMarketCap" style="font-size: 14px;">目标市值 (USD)</label>
                         <input type="number" id="targetMarketCap" placeholder="输入目标市值" oninput="onTargetMarketCapChange()" step="any">
                         <div class="small-text">当前: <span id="currentMarketCapHint">-</span></div>
                     </div>
+                    <div class="input-group" style="margin-bottom: 0;">
+                        <label for="token1UsdPrice" style="font-size: 14px;">Token1 (<span id="token1SymbolLabel">Token1</span>) USD价</label>
+                        <input type="number" id="token1UsdPrice" placeholder="例如: 1.00" oninput="calculateMarketCap()" step="any">
+                        <div class="small-text">💡 USDT输入 1.00</div>
+                    </div>
                 </div>
                 <!-- 快捷调整按钮 -->
-                <div style="display: flex; gap: 10px; margin-top: 10px; justify-content: center;">
-                    <button onclick="adjustMarketCap(0.5)" style="flex: 1; padding: 8px; font-size: 14px; background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);">-50%</button>
-                    <button onclick="adjustMarketCap(0.9)" style="flex: 1; padding: 8px; font-size: 14px; background: linear-gradient(135deg, #e67e22 0%, #d35400 100%);">-10%</button>
-                    <button onclick="adjustMarketCap(1.1)" style="flex: 1; padding: 8px; font-size: 14px; background: linear-gradient(135deg, #27ae60 0%, #229954 100%);">+10%</button>
-                    <button onclick="adjustMarketCap(2)" style="flex: 1; padding: 8px; font-size: 14px; background: linear-gradient(135deg, #16a085 0%, #138d75 100%);">+100%</button>
+                <div style="display: flex; gap: 8px; margin-bottom: 15px;">
+                    <button onclick="adjustMarketCap(0.5)" style="flex: 1; padding: 6px; font-size: 13px; background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);">-50%</button>
+                    <button onclick="adjustMarketCap(0.9)" style="flex: 1; padding: 6px; font-size: 13px; background: linear-gradient(135deg, #e67e22 0%, #d35400 100%);">-10%</button>
+                    <button onclick="adjustMarketCap(1.1)" style="flex: 1; padding: 6px; font-size: 13px; background: linear-gradient(135deg, #27ae60 0%, #229954 100%);">+10%</button>
+                    <button onclick="adjustMarketCap(2)" style="flex: 1; padding: 6px; font-size: 13px; background: linear-gradient(135deg, #16a085 0%, #138d75 100%);">+100%</button>
                 </div>
-                <div class="info-box" style="margin-top: 15px;">
+                <div class="info-box" style="margin-top: 10px; padding: 15px;">
                     <h3>要达到 <span id="targetMarketCapH">-</span> <span id="targetMarketCapDiffPercent">%</span> 市值</h3>
                     <h3>需要</h3>
                     <p id="requiredAmount">-</p>
                 </div>
 
-                <div style="margin-top: 30px; padding-top: 30px; border-top: 2px solid #e0e0e0;">
-                    <h3 style="margin-bottom: 20px; color: #667eea;">💵 美元市值计算</h3>
+                <div style="display: none; margin-top: 20px; padding-top: 20px; border-top: 2px solid #e0e0e0;">
                     <div class="input-group">
                         <label for="token1UsdPrice">Token1 (<span id="token1SymbolLabel">Token1</span>) 的美元价格</label>
-                        <input type="number" id="token1UsdPrice" placeholder="输入 Token1 的美元价格 (例如: 1.00)" oninput="calculateMarketCap()" step="any">
+                        <input type="number" placeholder="输入 Token1 的美元价格 (例如: 1.00)" oninput="calculateMarketCap()" step="any">
                         <div class="small-text">💡 例如：如果Token1是USDT，输入 1.00</div>
                     </div>
 
@@ -407,6 +409,7 @@
             <!-- 交易影响 -->
             <div id="impactDisplay" class="impact hidden">
                 <strong>价格影响: <span id="priceImpact">0%</span></strong>
+            </div>
             </div>
         </div>
 
@@ -554,7 +557,6 @@
             // 显示加载动画
             document.getElementById('loading').classList.remove('hidden');
             document.getElementById('poolInfo').classList.add('hidden');
-            document.getElementById('calculator').classList.add('hidden');
             document.getElementById('comparison').classList.add('hidden');
 
             try {
@@ -602,7 +604,6 @@
                 // 隐藏加载，显示其他部分
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('poolInfo').classList.remove('hidden');
-                document.getElementById('calculator').classList.remove('hidden');
 
             } catch (error) {
                 console.error('加载失败:', error);
@@ -722,8 +723,8 @@
             const price = parseFloat(reserve1) / parseFloat(reserve0);
             const inversePrice = parseFloat(reserve0) / parseFloat(reserve1);
 
-            document.getElementById('currentPrice').textContent = `1 ${token0Info.symbol} = ${price.toFixed(6)} ${token1Info.symbol}`;
-            document.getElementById('inversePrice').textContent = `${inversePrice.toFixed(6)} ${token0Info.symbol}`;
+            document.getElementById('currentPrice').textContent = `Current Price: 1 ${token0Info.symbol} = ${price.toFixed(6)} ${token1Info.symbol}`;
+            document.getElementById('inversePrice').textContent = `Inverse Price: 1 ${token1Info.symbol} = ${inversePrice.toFixed(6)} ${token0Info.symbol}`;
             document.getElementById('currentPriceHint').textContent = price.toFixed(6);
             
             // 更新Token1符号标签
@@ -775,10 +776,10 @@
             const poolPercentage = (token0PoolAmount / token0TotalSupplyAmount) * 100;
 
             // 显示结果
-            document.getElementById('token0UsdPrice').textContent = `$${token0UsdPrice.toFixed(6)}`;
+            document.getElementById('token0UsdPrice').textContent = `USD Price: $${token0UsdPrice.toFixed(6)}`;
             document.getElementById('token0PoolMarketCap').textContent = `$${token0PoolMarketCap.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
             document.getElementById('token0TotalMarketCap').textContent = `$${token0TotalMarketCap.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-            document.getElementById('token0TotalSupply').textContent = token0TotalSupplyAmount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ' + token0Info.symbol;
+            document.getElementById('token0TotalSupply').textContent = "Total Supply: " + token0TotalSupplyAmount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ' + token0Info.symbol;
             document.getElementById('poolPercentage').textContent = poolPercentage.toFixed(2) + '%';
             
             // 更新市值单位换算显示
