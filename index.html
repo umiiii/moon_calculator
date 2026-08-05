@@ -307,7 +307,10 @@
 
         <!-- 池子信息与价格计算 -->
         <div id="poolInfo" class="card hidden">
-            <h2 style="margin-bottom: 20px;">📊 池子信息 & 价格计算</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 15px; margin-bottom: 20px; flex-wrap: wrap;">
+                <h2 style="margin: 0;">📊 池子信息 & 价格计算 <span id="poolTypeBadge" style="font-size: 14px; color: #667eea;"></span></h2>
+                <button id="flipButton" onclick="flipTokens()" style="width: auto; padding: 10px 20px; font-size: 14px;">🔁 切换基准</button>
+            </div>
             
             <div class="info-grid" style="display: none;">
                 <div class="info-box">
@@ -367,7 +370,7 @@
                     <div class="input-group" style="margin-bottom: 0;">
                         <label for="token1UsdPrice" style="font-size: 14px;">Token1 (<span id="token1SymbolLabel">Token1</span>) USD价</label>
                         <input type="number" id="token1UsdPrice" placeholder="例如: 1.00" oninput="calculateMarketCap()" step="any">
-                        <div class="small-text">💡 USDT输入 1.00</div>
+                        <div class="small-text">💡 自动获取，也可手动修改</div>
                     </div>
                 </div>
                 <!-- 快捷调整按钮 -->
@@ -478,11 +481,38 @@
         let token0, token1;
         let token0Info = {}, token1Info = {};
         let isUpdating = false; // 防止循环更新
+        let isV3 = false;       // 是否为 V3 集中流动性池
+        let v3Price = null;     // V3 池价格（token0 以 token1 计价，已做 decimals 换算）
         
         // WBNB价格池地址 (WBNB/BUSD)
         const WBNB_PRICE_POOL = '0x16b9a82891338f9ba80e2d6970fdda79d1eb0dae';
         // WBNB合约地址
         const WBNB_ADDRESS = '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c'.toLowerCase();
+        // PancakeSwap V2 Factory
+        const PANCAKE_FACTORY = '0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73';
+        const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+        // BSC 上的主流稳定币
+        const STABLE_ADDRESSES = {
+            '0x55d398326f99059ff775485246999027b3197955': 'USDT',
+            '0xe9e7cea3dedca5984780bafc599bd69add087d56': 'BUSD',
+            '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d': 'USDC',
+            '0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3': 'DAI'
+        };
+
+        const FACTORY_ABI = [
+            {
+                "constant": true,
+                "inputs": [
+                    {"internalType": "address", "name": "", "type": "address"},
+                    {"internalType": "address", "name": "", "type": "address"}
+                ],
+                "name": "getPair",
+                "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+                "payable": false,
+                "stateMutability": "view",
+                "type": "function"
+            }
+        ];
         
         // PancakePair ABI
         const PAIR_ABI = [
@@ -519,6 +549,39 @@
             }
         ];
 
+        // V3 Pool ABI (slot0)
+        const V3_POOL_ABI = [
+            {
+                "inputs": [],
+                "name": "slot0",
+                "outputs": [
+                    {"internalType": "uint160", "name": "sqrtPriceX96", "type": "uint160"},
+                    {"internalType": "int24", "name": "tick", "type": "int24"},
+                    {"internalType": "uint16", "name": "observationIndex", "type": "uint16"},
+                    {"internalType": "uint16", "name": "observationCardinality", "type": "uint16"},
+                    {"internalType": "uint16", "name": "observationCardinalityNext", "type": "uint16"},
+                    {"internalType": "uint32", "name": "feeProtocol", "type": "uint32"},
+                    {"internalType": "bool", "name": "unlocked", "type": "bool"}
+                ],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "token0",
+                "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "token1",
+                "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+                "stateMutability": "view",
+                "type": "function"
+            }
+        ];
+
         // ERC20 ABI
         const ERC20_ABI = [
             {
@@ -548,6 +611,13 @@
                 "name": "totalSupply",
                 "outputs": [{"name": "", "type": "uint256"}],
                 "type": "function"
+            },
+            {
+                "constant": true,
+                "inputs": [{"name": "", "type": "address"}],
+                "name": "balanceOf",
+                "outputs": [{"name": "", "type": "uint256"}],
+                "type": "function"
             }
         ];
 
@@ -571,10 +641,23 @@
                 web3 = new Web3(rpcUrl);
                 pairContract = new web3.eth.Contract(PAIR_ABI, poolAddress);
 
-                // 读取合约数据
-                const reserves = await pairContract.methods.getReserves().call();
-                reserve0 = reserves._reserve0;
-                reserve1 = reserves._reserve1;
+                // 读取合约数据：先按 V2 读 getReserves，revert 则尝试按 V3 读 slot0
+                isV3 = false;
+                v3Price = null;
+                let v3SqrtPriceX96 = null;
+                try {
+                    const reserves = await pairContract.methods.getReserves().call();
+                    reserve0 = reserves._reserve0;
+                    reserve1 = reserves._reserve1;
+                } catch (v2Error) {
+                    console.log('getReserves() revert，尝试按 V3 池读取 slot0...');
+                    const v3Contract = new web3.eth.Contract(V3_POOL_ABI, poolAddress);
+                    const slot0 = await v3Contract.methods.slot0().call();
+                    v3SqrtPriceX96 = slot0.sqrtPriceX96;
+                    isV3 = true;
+                    pairContract = v3Contract;
+                    console.log('✅ 识别为 V3 池，sqrtPriceX96:', v3SqrtPriceX96);
+                }
 
                 token0 = await pairContract.methods.token0().call();
                 token1 = await pairContract.methods.token1().call();
@@ -602,11 +685,20 @@
                 console.log('Token0 Info:', token0Info);
                 console.log('Token1 Info:', token1Info);
 
+                // V3 池：用 sqrtPriceX96 计算价格，用池子实际持仓作为储备展示
+                if (isV3) {
+                    const sqrt = parseFloat(v3SqrtPriceX96) / Math.pow(2, 96);
+                    v3Price = sqrt * sqrt * Math.pow(10, parseInt(token0Info.decimals) - parseInt(token1Info.decimals));
+                    console.log('✅ V3 价格 (token0 以 token1 计价):', v3Price);
+                    reserve0 = await token0Contract.methods.balanceOf(poolAddress).call();
+                    reserve1 = await token1Contract.methods.balanceOf(poolAddress).call();
+                }
+
                 // 显示池子信息
                 displayPoolInfo();
                 
-                // 自动获取WBNB价格
-                await autoFetchWBNBPrice();
+                // 自动解析Token1美元价格
+                await resolveToken1UsdPrice();
 
                 // 隐藏加载，显示其他部分
                 document.getElementById('loading').classList.add('hidden');
@@ -619,85 +711,161 @@
             }
         }
         
-        // 自动获取WBNB价格
-        async function autoFetchWBNBPrice() {
+        // 读取某个池子，返回 tokenAddress 以另一个 token 计价的价格（已做 decimals 换算）
+        // 返回 { price, otherAddress, otherSymbol, otherReserve } 或 null
+        async function getTokenPriceInPair(pairAddress, tokenAddress) {
+            const pair = new web3.eth.Contract(PAIR_ABI, pairAddress);
+            const reserves = await pair.methods.getReserves().call();
+            const t0 = (await pair.methods.token0().call()).toLowerCase();
+            const t1 = (await pair.methods.token1().call()).toLowerCase();
+
+            const t0Contract = new web3.eth.Contract(ERC20_ABI, t0);
+            const t1Contract = new web3.eth.Contract(ERC20_ABI, t1);
+            const d0 = parseInt(await t0Contract.methods.decimals().call());
+            const d1 = parseInt(await t1Contract.methods.decimals().call());
+
+            const r0 = parseFloat(reserves._reserve0) / Math.pow(10, d0);
+            const r1 = parseFloat(reserves._reserve1) / Math.pow(10, d1);
+            if (r0 <= 0 || r1 <= 0) return null;
+
+            const target = tokenAddress.toLowerCase();
+            if (target === t0) {
+                return {
+                    price: r1 / r0,
+                    otherAddress: t1,
+                    otherSymbol: await t1Contract.methods.symbol().call(),
+                    otherReserve: r1
+                };
+            } else if (target === t1) {
+                return {
+                    price: r0 / r1,
+                    otherAddress: t0,
+                    otherSymbol: await t0Contract.methods.symbol().call(),
+                    otherReserve: r0
+                };
+            }
+            return null;
+        }
+
+        // 获取WBNB的美元价格
+        async function getWbnbUsdPrice() {
+            const result = await getTokenPriceInPair(WBNB_PRICE_POOL, WBNB_ADDRESS);
+            if (!result) throw new Error('WBNB价格池读取失败');
+            console.log('WBNB美元价格:', result.price.toFixed(2));
+            return result.price;
+        }
+
+        // 直接给某个 token 定美元价：
+        // 1. 是稳定币 -> 1.00
+        // 2. 是 WBNB -> 从价格池取 WBNB 美元价
+        // 3. 通过 Pancake 工厂找 token/稳定币 池
+        // 4. 通过 Pancake 工厂找 token/WBNB 池，再乘 WBNB 美元价
+        // 失败返回 null
+        async function resolveTokenUsdPriceDirect(tokenAddress, tokenSymbol) {
+            const addr = tokenAddress.toLowerCase();
+
+            if (STABLE_ADDRESSES[addr]) {
+                return { price: 1.0, source: `稳定币 ${STABLE_ADDRESSES[addr]}` };
+            }
+            if (addr === WBNB_ADDRESS) {
+                return { price: await getWbnbUsdPrice(), source: 'WBNB价格池' };
+            }
+
+            const factory = new web3.eth.Contract(FACTORY_ABI, PANCAKE_FACTORY);
+
+            // 找 token/稳定币 池（稳定币储备太小的池子不可信）
+            for (const [stableAddr, stableSymbol] of Object.entries(STABLE_ADDRESSES)) {
+                const pairAddr = await factory.methods.getPair(tokenAddress, stableAddr).call();
+                if (pairAddr && pairAddr.toLowerCase() !== ZERO_ADDRESS) {
+                    const result = await getTokenPriceInPair(pairAddr, addr);
+                    if (result && result.otherReserve >= 100) {
+                        return { price: result.price, source: `${tokenSymbol}/${stableSymbol} 池 (${pairAddr})` };
+                    }
+                }
+            }
+
+            // 找 token/WBNB 池
+            const pairAddr = await factory.methods.getPair(tokenAddress, WBNB_ADDRESS).call();
+            if (pairAddr && pairAddr.toLowerCase() !== ZERO_ADDRESS) {
+                const result = await getTokenPriceInPair(pairAddr, addr);
+                if (result && result.otherReserve >= 0.1) {
+                    const wbnbUsd = await getWbnbUsdPrice();
+                    return { price: result.price * wbnbUsd, source: `${tokenSymbol}/WBNB 池 (${pairAddr}) × WBNB美元价` };
+                }
+            }
+
+            return null;
+        }
+
+        // 自动解析 Token1 的美元价格；token1 无法直接定价时，
+        // 先给 token0 定价，再用当前池的兑换比例反推 token1
+        async function resolveToken1UsdPrice() {
             try {
-                // 检查token0或token1是否是WBNB
-                const isToken0WBNB = token0Info.address.toLowerCase() === WBNB_ADDRESS;
-                const isToken1WBNB = token1Info.address.toLowerCase() === WBNB_ADDRESS;
-                
-                if (!isToken0WBNB && !isToken1WBNB) {
-                    console.log('该池子不包含WBNB，跳过自动获取价格');
-                    return;
+                let resolved = await resolveTokenUsdPriceDirect(token1Info.address, token1Info.symbol);
+
+                if (!resolved) {
+                    const t0Resolved = await resolveTokenUsdPriceDirect(token0Info.address, token0Info.symbol);
+                    if (t0Resolved) {
+                        // token1 以 token0 计价 = 1 / (token0 以 token1 计价)
+                        const token1PriceInToken0 = 1 / getPoolPrice();
+                        resolved = {
+                            price: token1PriceInToken0 * t0Resolved.price,
+                            source: `当前池反推（${token0Info.symbol} 定价来源: ${t0Resolved.source}）`
+                        };
+                    }
                 }
-                
-                console.log('检测到WBNB，从价格池获取美元价格...');
-                
-                // 读取WBNB/BUSD价格池
-                const wbnbPriceContract = new web3.eth.Contract(PAIR_ABI, WBNB_PRICE_POOL);
-                const priceReserves = await wbnbPriceContract.methods.getReserves().call();
-                const priceToken0 = await wbnbPriceContract.methods.token0().call();
-                const priceToken1 = await wbnbPriceContract.methods.token1().call();
-                
-                console.log('价格池 Token0:', priceToken0);
-                console.log('价格池 Token1:', priceToken1);
-                console.log('价格池 Reserves:', priceReserves);
-                
-                // 获取token信息
-                const priceToken0Contract = new web3.eth.Contract(ERC20_ABI, priceToken0);
-                const priceToken1Contract = new web3.eth.Contract(ERC20_ABI, priceToken1);
-                
-                const priceToken0Decimals = await priceToken0Contract.methods.decimals().call();
-                const priceToken1Decimals = await priceToken1Contract.methods.decimals().call();
-                const priceToken0Symbol = await priceToken0Contract.methods.symbol().call();
-                const priceToken1Symbol = await priceToken1Contract.methods.symbol().call();
-                
-                console.log(`价格池: ${priceToken0Symbol} (${priceToken0Decimals} decimals) / ${priceToken1Symbol} (${priceToken1Decimals} decimals)`);
-                
-                // 确定WBNB在价格池中的位置并计算价格
-                let wbnbPrice;
-                if (priceToken0.toLowerCase() === WBNB_ADDRESS) {
-                    // WBNB是token0，价格 = reserve1 / reserve0
-                    const reserve0Adjusted = parseFloat(priceReserves._reserve0) / Math.pow(10, priceToken0Decimals);
-                    const reserve1Adjusted = parseFloat(priceReserves._reserve1) / Math.pow(10, priceToken1Decimals);
-                    wbnbPrice = reserve1Adjusted / reserve0Adjusted;
-                    console.log(`WBNB是Token0: ${reserve1Adjusted} ${priceToken1Symbol} / ${reserve0Adjusted} ${priceToken0Symbol} = ${wbnbPrice}`);
-                } else if (priceToken1.toLowerCase() === WBNB_ADDRESS) {
-                    // WBNB是token1，价格 = reserve0 / reserve1
-                    const reserve0Adjusted = parseFloat(priceReserves._reserve0) / Math.pow(10, priceToken0Decimals);
-                    const reserve1Adjusted = parseFloat(priceReserves._reserve1) / Math.pow(10, priceToken1Decimals);
-                    wbnbPrice = reserve0Adjusted / reserve1Adjusted;
-                    console.log(`WBNB是Token1: ${reserve0Adjusted} ${priceToken0Symbol} / ${reserve1Adjusted} ${priceToken1Symbol} = ${wbnbPrice}`);
+
+                if (resolved && isFinite(resolved.price) && resolved.price > 0) {
+                    document.getElementById('token1UsdPrice').value = resolved.price.toPrecision(8);
+                    console.log(`✅ Token1 (${token1Info.symbol}) 美元价格: ${resolved.price}，来源: ${resolved.source}`);
+                    calculateMarketCap();
                 } else {
-                    console.error('价格池中未找到WBNB');
-                    return;
+                    console.log(`⚠️ 无法自动确定 ${token1Info.symbol} 的美元价格，请手动输入`);
                 }
-                
-                console.log('✅ WBNB美元价格:', wbnbPrice.toFixed(2));
-                
-                // 如果当前池的token1是WBNB，直接设置美元价格
-                if (isToken1WBNB) {
-                    document.getElementById('token1UsdPrice').value = wbnbPrice.toFixed(2);
-                    console.log('✅ 已自动填充Token1 (WBNB) 的美元价格:', wbnbPrice.toFixed(2));
-                    // 触发市值计算
-                    calculateMarketCap();
-                }
-                // 如果token0是WBNB，我们需要计算token1的美元价格
-                else if (isToken0WBNB) {
-                    // Token0是WBNB，Token1的价格 = WBNB价格 / (Token0价格以Token1计)
-                    // Token0价格以Token1计 = Reserve1 / Reserve0
-                    const token0PriceInToken1 = parseFloat(reserve1) / parseFloat(reserve0);
-                    const token1UsdPrice = wbnbPrice / token0PriceInToken1;
-                    document.getElementById('token1UsdPrice').value = token1UsdPrice.toFixed(6);
-                    console.log('✅ 已自动计算Token1的美元价格:', token1UsdPrice.toFixed(6));
-                    // 触发市值计算
-                    calculateMarketCap();
-                }
-                
             } catch (error) {
-                console.error('❌ 获取WBNB价格失败:', error);
+                console.error('❌ 自动获取Token1美元价格失败:', error);
                 // 失败也不影响用户手动输入
             }
+        }
+
+        // 切换基准 token：对调 token0/token1 后重新渲染并重新自动定价
+        function flipTokens() {
+            if (!token0Info.address || !token1Info.address) return;
+
+            [token0Info, token1Info] = [token1Info, token0Info];
+            [token0, token1] = [token1, token0];
+            [reserve0, reserve1] = [reserve1, reserve0];
+            if (isV3 && v3Price) v3Price = 1 / v3Price;
+
+            // 清空依赖旧基准的输入与结果
+            document.getElementById('token1UsdPrice').value = '';
+            document.getElementById('targetMarketCap').value = '';
+            document.getElementById('requiredAmount').textContent = '-';
+            document.getElementById('targetMarketCapH').textContent = '-';
+            document.getElementById('targetMarketCapDiffPercent').textContent = '%';
+            document.getElementById('comparison').classList.add('hidden');
+            document.getElementById('impactDisplay').classList.add('hidden');
+
+            displayPoolInfo();
+            resolveToken1UsdPrice();
+        }
+
+        function updateFlipButtonLabel() {
+            document.getElementById('flipButton').textContent =
+                `🔁 当前计算 ${token0Info.symbol} 市值（点击切换为 ${token1Info.symbol}）`;
+        }
+
+        // 调整精度后的储备量
+        function getAdjustedReserve0() {
+            return parseFloat(reserve0) / Math.pow(10, parseInt(token0Info.decimals));
+        }
+        function getAdjustedReserve1() {
+            return parseFloat(reserve1) / Math.pow(10, parseInt(token1Info.decimals));
+        }
+        // Token0 以 Token1 计价（已做 decimals 换算）
+        function getPoolPrice() {
+            if (isV3 && v3Price) return v3Price;
+            return getAdjustedReserve1() / getAdjustedReserve0();
         }
 
         // 显示池子信息
@@ -726,16 +894,18 @@
             document.getElementById('reserve0Raw').textContent = 'Raw: ' + reserve0;
             document.getElementById('reserve1Raw').textContent = 'Raw: ' + reserve1;
 
-            // 计算价格 (Token0的价格，以Token1计价)
-            const price = parseFloat(reserve1) / parseFloat(reserve0);
-            const inversePrice = parseFloat(reserve0) / parseFloat(reserve1);
+            // 计算价格 (Token0的价格，以Token1计价，已做 decimals 换算)
+            const price = getPoolPrice();
+            const inversePrice = 1 / price;
 
             document.getElementById('currentPrice').textContent = `Current Price: 1 ${token0Info.symbol} = ${price.toFixed(6)} ${token1Info.symbol}`;
             document.getElementById('inversePrice').textContent = `Inverse Price: 1 ${token1Info.symbol} = ${inversePrice.toFixed(6)} ${token0Info.symbol}`;
             document.getElementById('currentPriceHint').textContent = price.toFixed(6);
             
-            // 更新Token1符号标签
+            // 更新Token1符号标签、池子类型标识和切换按钮文案
             document.getElementById('token1SymbolLabel').textContent = token1Info.symbol;
+            document.getElementById('poolTypeBadge').textContent = isV3 ? '[V3 池，价格来自 slot0]' : '[V2 池]';
+            updateFlipButtonLabel();
             
             // 设置默认目标价格
             document.getElementById('targetPrice').value = price.toFixed(6);
@@ -761,8 +931,8 @@
             const decimals0 = parseInt(token0Info.decimals);
             const decimals1 = parseInt(token1Info.decimals);
 
-            // 计算Token0的价格（以Token1计价）
-            const token0PriceInToken1 = parseFloat(reserve1) / parseFloat(reserve0);
+            // 计算Token0的价格（以Token1计价，已做 decimals 换算）
+            const token0PriceInToken1 = getPoolPrice();
             
             // 计算Token0的美元价格
             const token0UsdPrice = token0PriceInToken1 * token1UsdPrice;
@@ -915,37 +1085,43 @@
                 return;
             }
 
-            const currentPrice = parseFloat(reserve1) / parseFloat(reserve0);
-            const decimals0 = parseInt(token0Info.decimals);
-            const decimals1 = parseInt(token1Info.decimals);
-
-            // 根据恒定乘积公式: x * y = k
-            // 目标: y_new / x_new = targetPrice
-            // 已知: x * y = k
-            // y_new = targetPrice * x_new
-            // x * y = x_new * y_new = x_new * targetPrice * x_new
-            // x_new = sqrt(x * y / targetPrice)
-
-            const k = parseFloat(reserve0) * parseFloat(reserve1);
-            const newReserve0 = Math.sqrt(k / targetPrice);
-            const newReserve1 = targetPrice * newReserve0;
-
-            let amountIn, direction;
-            // 计算目标市值和百分比变化
+            const currentPrice = getPoolPrice();
             const token1UsdPrice = parseFloat(document.getElementById('token1UsdPrice').value);
-            if (targetPrice > currentPrice) {
-                // 需要买入 Token0 (使用 Token1)
-                amountIn = newReserve1 - parseFloat(reserve1);
-                let amountInUsd = amountIn * token1UsdPrice;
-                direction = `买入 ${(Math.abs(parseFloat(reserve0) - newReserve0) / Math.pow(10, decimals0)).toFixed(6)} ${token0Info.symbol} (支付 ${(amountIn / Math.pow(10, decimals1)).toFixed(6)} ${token1Info.symbol} = ${(amountInUsd / Math.pow(10, decimals1)).toFixed(6)}  USD)`;
-            } else {
-                // 需要卖出 Token0 (获得 Token1)
-                amountIn = parseFloat(reserve0) - newReserve0;
-                let amountInUsd = amountIn * token1UsdPrice;
-                direction = `卖出 ${(amountIn / Math.pow(10, decimals0)).toFixed(6)} ${token0Info.symbol} (获得 ${(Math.abs(parseFloat(reserve1) - newReserve1) / Math.pow(10, decimals1)).toFixed(6)} ${token1Info.symbol} = ${(amountInUsd / Math.pow(10, decimals1)).toFixed(6)}   USD)`;
-            }
 
-            document.getElementById('requiredAmount').textContent = direction;
+            if (isV3) {
+                // V3 集中流动性池：恒定乘积公式不适用，无法用储备量推算买卖量
+                document.getElementById('requiredAmount').textContent = 'V3 集中流动性池，暂不支持买卖量计算';
+                document.getElementById('comparison').classList.add('hidden');
+            } else {
+                // 使用换算后的储备量（真实数量）做恒定乘积计算
+                // 根据恒定乘积公式: x * y = k
+                // 目标: y_new / x_new = targetPrice
+                // x_new = sqrt(x * y / targetPrice)
+                const r0 = getAdjustedReserve0();
+                const r1 = getAdjustedReserve1();
+                const k = r0 * r1;
+                const newReserve0 = Math.sqrt(k / targetPrice);
+                const newReserve1 = targetPrice * newReserve0;
+
+                let direction;
+                if (targetPrice > currentPrice) {
+                    // 需要买入 Token0 (使用 Token1)
+                    const amountIn = newReserve1 - r1;
+                    const amountInUsd = amountIn * token1UsdPrice;
+                    direction = `买入 ${(r0 - newReserve0).toFixed(6)} ${token0Info.symbol} (支付 ${amountIn.toFixed(6)} ${token1Info.symbol} = ${amountInUsd.toFixed(2)} USD)`;
+                } else {
+                    // 需要卖出 Token0 (获得 Token1)
+                    const amountIn = newReserve0 - r0;
+                    const amountOut = r1 - newReserve1;
+                    const amountOutUsd = amountOut * token1UsdPrice;
+                    direction = `卖出 ${amountIn.toFixed(6)} ${token0Info.symbol} (获得 ${amountOut.toFixed(6)} ${token1Info.symbol} = ${amountOutUsd.toFixed(2)} USD)`;
+                }
+
+                document.getElementById('requiredAmount').textContent = direction;
+
+                // 显示对比（全部使用换算后的真实数量）
+                showComparison(r0, r1, newReserve0, newReserve1);
+            }
 
             if (token1UsdPrice && token1UsdPrice > 0) {
                 const token0TotalSupplyAmount = parseFloat(token0Info.totalSupply) / Math.pow(10, decimals0);
@@ -985,25 +1161,19 @@
             if (Math.abs(priceImpact) > 5) {
                 impactDisplay.classList.add('high');
             }
-
-            // 显示对比
-            showComparison(reserve0, reserve1, newReserve0, newReserve1);
         }
 
-        // 显示对比
+        // 显示对比（参数均为换算后的真实数量）
         function showComparison(oldR0, oldR1, newR0, newR1) {
-            const decimals0 = parseInt(token0Info.decimals);
-            const decimals1 = parseInt(token1Info.decimals);
-            
-            document.getElementById('beforeReserve0').textContent = (oldR0 / Math.pow(10, decimals0)).toFixed(6) + ' ' + token0Info.symbol;
-            document.getElementById('beforeReserve1').textContent = (oldR1 / Math.pow(10, decimals1)).toFixed(6) + ' ' + token1Info.symbol;
+            document.getElementById('beforeReserve0').textContent = oldR0.toFixed(6) + ' ' + token0Info.symbol;
+            document.getElementById('beforeReserve1').textContent = oldR1.toFixed(6) + ' ' + token1Info.symbol;
             document.getElementById('beforePrice').textContent = (oldR1 / oldR0).toFixed(6) + ' ' + token1Info.symbol;
-            document.getElementById('beforeK').textContent = ((oldR0 / Math.pow(10, decimals0)) * (oldR1 / Math.pow(10, decimals1))).toExponential(4);
+            document.getElementById('beforeK').textContent = (oldR0 * oldR1).toExponential(4);
 
-            document.getElementById('afterReserve0').textContent = (newR0 / Math.pow(10, decimals0)).toFixed(6) + ' ' + token0Info.symbol;
-            document.getElementById('afterReserve1').textContent = (newR1 / Math.pow(10, decimals1)).toFixed(6) + ' ' + token1Info.symbol;
+            document.getElementById('afterReserve0').textContent = newR0.toFixed(6) + ' ' + token0Info.symbol;
+            document.getElementById('afterReserve1').textContent = newR1.toFixed(6) + ' ' + token1Info.symbol;
             document.getElementById('afterPrice').textContent = (newR1 / newR0).toFixed(6) + ' ' + token1Info.symbol;
-            document.getElementById('afterK').textContent = ((newR0 / Math.pow(10, decimals0)) * (newR1 / Math.pow(10, decimals1))).toExponential(4);
+            document.getElementById('afterK').textContent = (newR0 * newR1).toExponential(4);
 
             document.getElementById('comparison').classList.remove('hidden');
         }
