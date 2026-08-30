@@ -1,0 +1,13 @@
+{
+  "name": "moon-calculator",
+  "version": "1.0.0",
+  "description": "AMM 池子价格/市值计算器，支持 V2 / V3 / V4 求解「从 X 市值到 Y 市值需要多少资金」",
+  "private": true,
+  "scripts": {
+    "test": "node test/verify.js",
+    "test:browser": "node test/browser.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.0"
+  }
+}

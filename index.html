@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AMM Pool 价格计算器</title>
-    <script src="https://cdn.jsdelivr.net/npm/web3@1.10.0/dist/web3.min.js"></script>
     <!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-XWNKZC88C6"></script>
 <script>
@@ -292,10 +291,52 @@
                     <input type="text" id="rpcUrl" value="https://rpc-bsc.48.club" placeholder="输入RPC URL">
                 </div>
                 <div class="input-group" style="margin-bottom: 0;">
-                    <label for="poolAddress">Pool 地址</label>
-                    <input type="text" id="poolAddress" value ="0x66f289de31eef70d52186729d2637ac978cfc56b" placeholder="输入 PancakePair 地址">
+                    <label for="poolAddress">Pool 地址 / V4 poolId</label>
+                    <input type="text" id="poolAddress" value ="0x66f289de31eef70d52186729d2637ac978cfc56b" placeholder="V2/V3 池子地址（40位hex），或 V4 poolId（64位hex）">
                 </div>
             </div>
+
+            <!-- V4 PoolKey：V4 没有独立池合约，池子由 PoolKey 五元组决定 -->
+            <div style="margin-bottom: 15px;">
+                <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; color: #555; font-size: 14px;">
+                    <input type="checkbox" id="useV4PoolKey" onchange="toggleV4Panel()" style="width: auto; margin: 0;">
+                    使用 V4 PoolKey 指定池子
+                </label>
+                <div id="v4Panel" class="hidden" style="margin-top: 12px; padding: 15px; background: #f8f9ff; border: 1px solid #e0e4f5; border-radius: 8px;">
+                    <div class="small-text" style="margin-bottom: 12px;">
+                        V4 是单例 PoolManager，池子由 PoolKey 唯一确定。填好后会自动算出 poolId。
+                        原生 BNB 请填 0x0000...0000。
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <div class="input-group" style="margin-bottom: 0;">
+                            <label for="v4Currency0" style="font-size: 13px;">currency0</label>
+                            <input type="text" id="v4Currency0" oninput="onV4KeyChange()" placeholder="0x...">
+                        </div>
+                        <div class="input-group" style="margin-bottom: 0;">
+                            <label for="v4Currency1" style="font-size: 13px;">currency1</label>
+                            <input type="text" id="v4Currency1" oninput="onV4KeyChange()" placeholder="0x...">
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 12px; margin-top: 12px;">
+                        <div class="input-group" style="margin-bottom: 0;">
+                            <label for="v4Fee" style="font-size: 13px;">fee</label>
+                            <input type="number" id="v4Fee" oninput="onV4KeyChange()" placeholder="例如 500" step="1">
+                        </div>
+                        <div class="input-group" style="margin-bottom: 0;">
+                            <label for="v4TickSpacing" style="font-size: 13px;">tickSpacing</label>
+                            <input type="number" id="v4TickSpacing" oninput="onV4KeyChange()" placeholder="例如 10" step="1">
+                        </div>
+                        <div class="input-group" style="margin-bottom: 0;">
+                            <label for="v4Hooks" style="font-size: 13px;">hooks</label>
+                            <input type="text" id="v4Hooks" oninput="onV4KeyChange()" placeholder="0x0000000000000000000000000000000000000000">
+                        </div>
+                    </div>
+                    <div class="small-text" style="margin-top: 10px; word-break: break-all;">
+                        poolId: <span id="v4ComputedId" style="font-family: monospace;">-</span>
+                    </div>
+                </div>
+            </div>
+
             <button onclick="loadPool()">🔍 加载池子信息</button>
         </div>
 
@@ -342,7 +383,7 @@
                 <div class="input-group">
                     <h2>Price</h2>
                     <div class="price" id="currentPrice">-</div>
-                    <div class="price" id="currentPrice"><span id="inversePrice">- </span></div>
+                    <div class="price"><span id="inversePrice">- </span></div>
                     <div class="price" id="token0UsdPrice">-</div>
                 </div>
                 <div class="input-group">
@@ -370,7 +411,7 @@
                     <div class="input-group" style="margin-bottom: 0;">
                         <label for="token1UsdPrice" style="font-size: 14px;">Token1 (<span id="token1SymbolLabel">Token1</span>) USD价</label>
                         <input type="number" id="token1UsdPrice" placeholder="例如: 1.00" oninput="calculateMarketCap()" step="any">
-                        <div class="small-text">💡 自动获取，也可手动修改</div>
+                        <div class="small-text" id="usdPriceHint">💡 自动获取，也可手动修改</div>
                     </div>
                 </div>
                 <!-- 快捷调整按钮 -->
@@ -382,37 +423,12 @@
                     <h3>要达到 <span id="targetMarketCapH">-</span> <span id="targetMarketCapDiffPercent">%</span> 市值</h3>
                     <h3>需要</h3>
                     <p id="requiredAmount">-</p>
-                </div>
-
-                <div style="display: none; margin-top: 20px; padding-top: 20px; border-top: 2px solid #e0e0e0;">
-                    <div class="input-group">
-                        <label for="token1UsdPrice">Token1 (<span id="token1SymbolLabel">Token1</span>) 的美元价格</label>
-                        <input type="number" placeholder="输入 Token1 的美元价格 (例如: 1.00)" oninput="calculateMarketCap()" step="any">
-                        <div class="small-text">💡 例如：如果Token1是USDT，输入 1.00</div>
-                    </div>
-
-                    <div class="info-grid" style="margin-top: 20px; display: none;">
-                        <div class="info-box" style="background: linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%);">
-                            <h3>Token0 美元价格</h3>
-                            <p style="font-size: 24px; color: #2d3436;">-</p>
-                        </div>
-                        <div class="info-box" style="display: none;background: linear-gradient(135deg, #74b9ff 0%, #0984e3 100%); color: white;">
-                            <h3 style="color: white;">Token0 池内市值</h3>
-                            <p id="token0PoolMarketCap" style="font-size: 24px; color: white;">-</p>
-                            <div class="small-text" style="color: rgba(255,255,255,0.8); margin-top: 5px;">基于池内储备量</div>
-                        </div>
-                    </div>
-                    
-                    <div class="info-grid" style="margin-top: 15px;">
-                        <!-- <div class="info-box">
-                            <h3>Token0 总供应量</h3>
-                            <p id="token0TotalSupply" style="font-size: 16px;">-</p>
-                        </div> -->
-                        <div class="info-box">
-                            <h3>池内占比</h3>
-                            <p id="poolPercentage" style="font-size: 16px;">-</p>
-                        </div>
-                    </div>
+                    <div class="small-text" style="margin-top: 8px;">以上只是这一个池子。单池会被套利拉回，实际成本要看全部场地 ↓</div>
+                    <button onclick="runAggregate()" id="aggBtn"
+                        style="margin-top: 12px; padding: 10px; font-size: 14px;
+                               background: linear-gradient(135deg, #16a085 0%, #138d75 100%);">
+                        🌐 汇总全部池子（V2 + V3 + V4）
+                    </button>
                 </div>
             </div>
 
@@ -420,6 +436,41 @@
             <div id="impactDisplay" class="impact hidden">
                 <strong>价格影响: <span id="priceImpact">0%</span></strong>
             </div>
+            </div>
+        </div>
+
+        <!-- 多池汇总 -->
+        <div id="aggregate" class="card hidden">
+            <h2 style="margin-bottom: 10px;">🌐 全部池子汇总</h2>
+            <div class="small-text" id="aggMeta" style="margin-bottom: 15px;">-</div>
+
+            <div class="info-box" style="margin-bottom: 20px; padding: 20px;">
+                <h3>把所有场地都推到目标价，合计需要</h3>
+                <p id="aggTotal" style="font-size: 28px;">-</p>
+                <div class="small-text" id="aggCompare" style="margin-top: 8px;">-</div>
+            </div>
+
+            <div style="overflow-x: auto;">
+                <table id="aggTable" style="width: 100%; border-collapse: collapse; font-size: 13px; min-width: 700px;">
+                    <thead>
+                        <tr style="background: #f5f7fa; text-align: left;">
+                            <th style="padding: 10px; border-bottom: 2px solid #e0e0e0;">类型</th>
+                            <th style="padding: 10px; border-bottom: 2px solid #e0e0e0;">场地</th>
+                            <th style="padding: 10px; border-bottom: 2px solid #e0e0e0;">交易对</th>
+                            <th style="padding: 10px; border-bottom: 2px solid #e0e0e0; text-align: right;">费率</th>
+                            <th style="padding: 10px; border-bottom: 2px solid #e0e0e0; text-align: right;">池内现价</th>
+                            <th style="padding: 10px; border-bottom: 2px solid #e0e0e0; text-align: right;">所需资金</th>
+                            <th style="padding: 10px; border-bottom: 2px solid #e0e0e0;">备注</th>
+                        </tr>
+                    </thead>
+                    <tbody id="aggRows"></tbody>
+                </table>
+            </div>
+
+            <div class="small-text" style="margin-top: 15px; line-height: 1.7;">
+                只覆盖已配置工厂上的池子（PancakeSwap V2/V3、Uniswap V2/V3/V4、Biswap V2），
+                CEX 与未收录的 DEX 不在内，所以这仍是下界。
+                V4 靠扫最近区块的 Initialize 事件发现，受 RPC 的 getLogs 上限限制，可能漏掉老池子。
             </div>
         </div>
 
@@ -473,376 +524,204 @@
         </div>
     </div>
 
+    <!-- 求解模块：顺序不能调，后面的依赖前面的全局对象 -->
+    <script src="src/keccak.js"></script>
+    <script src="src/tickmath.js"></script>
+    <script src="src/rpc.js"></script>
+    <script src="src/pricing.js"></script>
+    <script src="src/clsolver.js"></script>
+    <script src="src/adapters.js"></script>
+    <script src="src/aggregate.js"></script>
+
     <script>
-        // 全局变量
-        let web3;
-        let pairContract;
-        let reserve0, reserve1;
-        let token0, token1;
+        // ==================== 全局状态 ====================
+        let adapter = null;            // 当前池子适配器（V2 / V3 / V4）
+        let flipped = false;           // 是否把基准换成了另一个 token
+
+        // 展示口径：token0Info 是「要算市值的那个币」，token1Info 是报价币。
+        // flip 之后这两个会对调，但 adapter 内部始终保持链上的 token0/token1 顺序。
         let token0Info = {}, token1Info = {};
-        let isUpdating = false; // 防止循环更新
-        let isV3 = false;       // 是否为 V3 集中流动性池
-        let v3Price = null;     // V3 池价格（token0 以 token1 计价，已做 decimals 换算）
-        
-        // WBNB价格池地址 (WBNB/BUSD)
-        const WBNB_PRICE_POOL = '0x16b9a82891338f9ba80e2d6970fdda79d1eb0dae';
-        // WBNB合约地址
-        const WBNB_ADDRESS = '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c'.toLowerCase();
-        // PancakeSwap V2 Factory
-        const PANCAKE_FACTORY = '0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73';
+        let reserve0 = 0, reserve1 = 0;
+
+        let isUpdating = false;        // 防止价格/市值输入框互相触发
+        let solveSeq = 0;              // 求解请求序号，丢弃过期的异步结果
+        let solveTimer = null;         // 输入防抖
+
         const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
-        // BSC 上的主流稳定币
-        const STABLE_ADDRESSES = {
-            '0x55d398326f99059ff775485246999027b3197955': 'USDT',
-            '0xe9e7cea3dedca5984780bafc599bd69add087d56': 'BUSD',
-            '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d': 'USDC',
-            '0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3': 'DAI'
-        };
 
-        const FACTORY_ABI = [
-            {
-                "constant": true,
-                "inputs": [
-                    {"internalType": "address", "name": "", "type": "address"},
-                    {"internalType": "address", "name": "", "type": "address"}
-                ],
-                "name": "getPair",
-                "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-                "payable": false,
-                "stateMutability": "view",
-                "type": "function"
-            }
-        ];
-        
-        // PancakePair ABI
-        const PAIR_ABI = [
-            {
-                "constant": true,
-                "inputs": [],
-                "name": "getReserves",
-                "outputs": [
-                    {"internalType": "uint112", "name": "_reserve0", "type": "uint112"},
-                    {"internalType": "uint112", "name": "_reserve1", "type": "uint112"},
-                    {"internalType": "uint32", "name": "_blockTimestampLast", "type": "uint32"}
-                ],
-                "payable": false,
-                "stateMutability": "view",
-                "type": "function"
-            },
-            {
-                "constant": true,
-                "inputs": [],
-                "name": "token0",
-                "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-                "payable": false,
-                "stateMutability": "view",
-                "type": "function"
-            },
-            {
-                "constant": true,
-                "inputs": [],
-                "name": "token1",
-                "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-                "payable": false,
-                "stateMutability": "view",
-                "type": "function"
-            }
-        ];
+        // ==================== 小工具 ====================
 
-        // V3 Pool ABI (slot0)
-        const V3_POOL_ABI = [
-            {
-                "inputs": [],
-                "name": "slot0",
-                "outputs": [
-                    {"internalType": "uint160", "name": "sqrtPriceX96", "type": "uint160"},
-                    {"internalType": "int24", "name": "tick", "type": "int24"},
-                    {"internalType": "uint16", "name": "observationIndex", "type": "uint16"},
-                    {"internalType": "uint16", "name": "observationCardinality", "type": "uint16"},
-                    {"internalType": "uint16", "name": "observationCardinalityNext", "type": "uint16"},
-                    {"internalType": "uint32", "name": "feeProtocol", "type": "uint32"},
-                    {"internalType": "bool", "name": "unlocked", "type": "bool"}
-                ],
-                "stateMutability": "view",
-                "type": "function"
-            },
-            {
-                "inputs": [],
-                "name": "token0",
-                "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-                "stateMutability": "view",
-                "type": "function"
-            },
-            {
-                "inputs": [],
-                "name": "token1",
-                "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-                "stateMutability": "view",
-                "type": "function"
-            }
-        ];
+        /** 安全写文本：元素不存在就静默跳过，避免因为改版删了节点就整段逻辑中断 */
+        function setText(id, value) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        }
 
-        // ERC20 ABI
-        const ERC20_ABI = [
-            {
-                "constant": true,
-                "inputs": [],
-                "name": "name",
-                "outputs": [{"name": "", "type": "string"}],
-                "type": "function"
-            },
-            {
-                "constant": true,
-                "inputs": [],
-                "name": "symbol",
-                "outputs": [{"name": "", "type": "string"}],
-                "type": "function"
-            },
-            {
-                "constant": true,
-                "inputs": [],
-                "name": "decimals",
-                "outputs": [{"name": "", "type": "uint8"}],
-                "type": "function"
-            },
-            {
-                "constant": true,
-                "inputs": [],
-                "name": "totalSupply",
-                "outputs": [{"name": "", "type": "uint256"}],
-                "type": "function"
-            },
-            {
-                "constant": true,
-                "inputs": [{"name": "", "type": "address"}],
-                "name": "balanceOf",
-                "outputs": [{"name": "", "type": "uint256"}],
-                "type": "function"
-            }
-        ];
+        function fmtUsd(v) {
+            if (!isFinite(v)) return '-';
+            return '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
 
-        // 加载池子信息
+        function fmtAmount(v) {
+            if (!isFinite(v)) return '-';
+            const a = Math.abs(v);
+            if (a >= 1) return a.toLocaleString('en-US', { maximumFractionDigits: 6 });
+            return a.toPrecision(6);
+        }
+
+        // ==================== V4 PoolKey 面板 ====================
+
+        function toggleV4Panel() {
+            const on = document.getElementById('useV4PoolKey').checked;
+            document.getElementById('v4Panel').classList.toggle('hidden', !on);
+            if (on) onV4KeyChange();
+        }
+
+        function readV4PoolKey() {
+            const c0 = document.getElementById('v4Currency0').value.trim();
+            const c1 = document.getElementById('v4Currency1').value.trim();
+            const fee = document.getElementById('v4Fee').value.trim();
+            const ts = document.getElementById('v4TickSpacing').value.trim();
+            const hooks = document.getElementById('v4Hooks').value.trim() || ZERO_ADDRESS;
+            if (!PoolAdapters.isAddress(c0) || !PoolAdapters.isAddress(c1)) return null;
+            if (fee === '' || ts === '') return null;
+            if (!PoolAdapters.isAddress(hooks)) return null;
+            return {
+                currency0: c0, currency1: c1,
+                fee: Number(fee), tickSpacing: Number(ts), hooks: hooks
+            };
+        }
+
+        function onV4KeyChange() {
+            const key = readV4PoolKey();
+            if (!key) { setText('v4ComputedId', '（把五个字段填完整）'); return; }
+            try {
+                const id = PoolAdapters.computePoolId(key);
+                setText('v4ComputedId', id);
+                document.getElementById('poolAddress').value = id;
+            } catch (e) {
+                setText('v4ComputedId', '计算失败: ' + e.message);
+            }
+        }
+
+        // ==================== 加载池子 ====================
+
         async function loadPool() {
             const rpcUrl = document.getElementById('rpcUrl').value.trim();
-            const poolAddress = document.getElementById('poolAddress').value.trim();
+            const input = document.getElementById('poolAddress').value.trim();
+            const useKey = document.getElementById('useV4PoolKey').checked;
 
-            if (!poolAddress || !Web3.utils.isAddress(poolAddress)) {
-                alert('请输入有效的池子地址！');
+            if (!PoolAdapters.isAddress(input) && !PoolAdapters.isPoolId(input) && !useKey) {
+                alert('请输入有效的池子地址（40 位 hex）或 V4 poolId（64 位 hex）');
                 return;
             }
 
-            // 显示加载动画
             document.getElementById('loading').classList.remove('hidden');
             document.getElementById('poolInfo').classList.add('hidden');
             document.getElementById('comparison').classList.add('hidden');
 
             try {
-                // 初始化 Web3
-                web3 = new Web3(rpcUrl);
-                pairContract = new web3.eth.Contract(PAIR_ABI, poolAddress);
-
-                // 读取合约数据：先按 V2 读 getReserves，revert 则尝试按 V3 读 slot0
-                isV3 = false;
-                v3Price = null;
-                let v3SqrtPriceX96 = null;
-                try {
-                    const reserves = await pairContract.methods.getReserves().call();
-                    reserve0 = reserves._reserve0;
-                    reserve1 = reserves._reserve1;
-                } catch (v2Error) {
-                    console.log('getReserves() revert，尝试按 V3 池读取 slot0...');
-                    const v3Contract = new web3.eth.Contract(V3_POOL_ABI, poolAddress);
-                    const slot0 = await v3Contract.methods.slot0().call();
-                    v3SqrtPriceX96 = slot0.sqrtPriceX96;
-                    isV3 = true;
-                    pairContract = v3Contract;
-                    console.log('✅ 识别为 V3 池，sqrtPriceX96:', v3SqrtPriceX96);
+                const opts = {};
+                if (useKey) {
+                    const key = readV4PoolKey();
+                    if (!key) throw new Error('V4 PoolKey 填写不完整');
+                    opts.poolKey = key;
                 }
 
-                token0 = await pairContract.methods.token0().call();
-                token1 = await pairContract.methods.token1().call();
+                adapter = await PoolAdapters.createAdapter(rpcUrl, input, opts);
+                flipped = false;
+                applyOrientation();
 
-                // 获取Token0信息
-                const token0Contract = new web3.eth.Contract(ERC20_ABI, token0);
-                token0Info = {
-                    address: token0,
-                    name: await token0Contract.methods.name().call(),
-                    symbol: await token0Contract.methods.symbol().call(),
-                    decimals: await token0Contract.methods.decimals().call(),
-                    totalSupply: await token0Contract.methods.totalSupply().call()
-                };
+                console.log('池型:', adapter.kind, adapter);
 
-                // 获取Token1信息
-                const token1Contract = new web3.eth.Contract(ERC20_ABI, token1);
-                token1Info = {
-                    address: token1,
-                    name: await token1Contract.methods.name().call(),
-                    symbol: await token1Contract.methods.symbol().call(),
-                    decimals: await token1Contract.methods.decimals().call(),
-                    totalSupply: await token1Contract.methods.totalSupply().call()
-                };
-
-                console.log('Token0 Info:', token0Info);
-                console.log('Token1 Info:', token1Info);
-
-                // V3 池：用 sqrtPriceX96 计算价格，用池子实际持仓作为储备展示
-                if (isV3) {
-                    const sqrt = parseFloat(v3SqrtPriceX96) / Math.pow(2, 96);
-                    v3Price = sqrt * sqrt * Math.pow(10, parseInt(token0Info.decimals) - parseInt(token1Info.decimals));
-                    console.log('✅ V3 价格 (token0 以 token1 计价):', v3Price);
-                    reserve0 = await token0Contract.methods.balanceOf(poolAddress).call();
-                    reserve1 = await token1Contract.methods.balanceOf(poolAddress).call();
-                }
-
-                // 显示池子信息
+                document.getElementById('targetMarketCap').value = '';
                 displayPoolInfo();
-                
-                // 自动解析Token1美元价格
                 await resolveToken1UsdPrice();
 
-                // 隐藏加载，显示其他部分
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('poolInfo').classList.remove('hidden');
-
             } catch (error) {
                 console.error('加载失败:', error);
                 alert('加载池子信息失败: ' + error.message);
                 document.getElementById('loading').classList.add('hidden');
             }
         }
-        
-        // 读取某个池子，返回 tokenAddress 以另一个 token 计价的价格（已做 decimals 换算）
-        // 返回 { price, otherAddress, otherSymbol, otherReserve } 或 null
-        async function getTokenPriceInPair(pairAddress, tokenAddress) {
-            const pair = new web3.eth.Contract(PAIR_ABI, pairAddress);
-            const reserves = await pair.methods.getReserves().call();
-            const t0 = (await pair.methods.token0().call()).toLowerCase();
-            const t1 = (await pair.methods.token1().call()).toLowerCase();
 
-            const t0Contract = new web3.eth.Contract(ERC20_ABI, t0);
-            const t1Contract = new web3.eth.Contract(ERC20_ABI, t1);
-            const d0 = parseInt(await t0Contract.methods.decimals().call());
-            const d1 = parseInt(await t1Contract.methods.decimals().call());
-
-            const r0 = parseFloat(reserves._reserve0) / Math.pow(10, d0);
-            const r1 = parseFloat(reserves._reserve1) / Math.pow(10, d1);
-            if (r0 <= 0 || r1 <= 0) return null;
-
-            const target = tokenAddress.toLowerCase();
-            if (target === t0) {
-                return {
-                    price: r1 / r0,
-                    otherAddress: t1,
-                    otherSymbol: await t1Contract.methods.symbol().call(),
-                    otherReserve: r1
-                };
-            } else if (target === t1) {
-                return {
-                    price: r0 / r1,
-                    otherAddress: t0,
-                    otherSymbol: await t0Contract.methods.symbol().call(),
-                    otherReserve: r0
-                };
+        /** 按当前 flipped 状态，把 adapter 的链上顺序映射成展示用的 base/quote */
+        function applyOrientation() {
+            if (!adapter) return;
+            token0Info = flipped ? adapter.token1Info : adapter.token0Info;
+            token1Info = flipped ? adapter.token0Info : adapter.token1Info;
+            if (adapter.kind === 'v2') {
+                reserve0 = flipped ? adapter.reserve1 : adapter.reserve0;
+                reserve1 = flipped ? adapter.reserve0 : adapter.reserve1;
+            } else {
+                // 集中流动性池没有「储备量」这个概念，池内余额也不能用来做恒定乘积推算
+                reserve0 = 0;
+                reserve1 = 0;
             }
-            return null;
         }
 
-        // 获取WBNB的美元价格
-        async function getWbnbUsdPrice() {
-            const result = await getTokenPriceInPair(WBNB_PRICE_POOL, WBNB_ADDRESS);
-            if (!result) throw new Error('WBNB价格池读取失败');
-            console.log('WBNB美元价格:', result.price.toFixed(2));
-            return result.price;
+        /** 展示口径的价格：1 个 base 值多少 quote */
+        function getPoolPrice() {
+            if (!adapter) return NaN;
+            const p = adapter.spotPrice();
+            return flipped ? 1 / p : p;
         }
 
-        // 直接给某个 token 定美元价：
-        // 1. 是稳定币 -> 1.00
-        // 2. 是 WBNB -> 从价格池取 WBNB 美元价
-        // 3. 通过 Pancake 工厂找 token/稳定币 池
-        // 4. 通过 Pancake 工厂找 token/WBNB 池，再乘 WBNB 美元价
-        // 失败返回 null
-        async function resolveTokenUsdPriceDirect(tokenAddress, tokenSymbol) {
-            const addr = tokenAddress.toLowerCase();
-
-            if (STABLE_ADDRESSES[addr]) {
-                return { price: 1.0, source: `稳定币 ${STABLE_ADDRESSES[addr]}` };
-            }
-            if (addr === WBNB_ADDRESS) {
-                return { price: await getWbnbUsdPrice(), source: 'WBNB价格池' };
-            }
-
-            const factory = new web3.eth.Contract(FACTORY_ABI, PANCAKE_FACTORY);
-
-            // 找 token/稳定币 池（稳定币储备太小的池子不可信）
-            for (const [stableAddr, stableSymbol] of Object.entries(STABLE_ADDRESSES)) {
-                const pairAddr = await factory.methods.getPair(tokenAddress, stableAddr).call();
-                if (pairAddr && pairAddr.toLowerCase() !== ZERO_ADDRESS) {
-                    const result = await getTokenPriceInPair(pairAddr, addr);
-                    if (result && result.otherReserve >= 100) {
-                        return { price: result.price, source: `${tokenSymbol}/${stableSymbol} 池 (${pairAddr})` };
-                    }
-                }
-            }
-
-            // 找 token/WBNB 池
-            const pairAddr = await factory.methods.getPair(tokenAddress, WBNB_ADDRESS).call();
-            if (pairAddr && pairAddr.toLowerCase() !== ZERO_ADDRESS) {
-                const result = await getTokenPriceInPair(pairAddr, addr);
-                if (result && result.otherReserve >= 0.1) {
-                    const wbnbUsd = await getWbnbUsdPrice();
-                    return { price: result.price * wbnbUsd, source: `${tokenSymbol}/WBNB 池 (${pairAddr}) × WBNB美元价` };
-                }
-            }
-
-            return null;
+        function getAdjustedReserve0() {
+            return Number(reserve0) / Math.pow(10, parseInt(token0Info.decimals));
+        }
+        function getAdjustedReserve1() {
+            return Number(reserve1) / Math.pow(10, parseInt(token1Info.decimals));
         }
 
-        // 自动解析 Token1 的美元价格；token1 无法直接定价时，
-        // 先给 token0 定价，再用当前池的兑换比例反推 token1
+        // ==================== 美元定价 ====================
+
         async function resolveToken1UsdPrice() {
             try {
-                let resolved = await resolveTokenUsdPriceDirect(token1Info.address, token1Info.symbol);
+                const rpc = adapter.rpc, tag = adapter.blockTag;
+                let resolved = await Pricing.resolveTokenUsdPrice(
+                    rpc, token1Info.address, token1Info.symbol, tag);
 
                 if (!resolved) {
-                    const t0Resolved = await resolveTokenUsdPriceDirect(token0Info.address, token0Info.symbol);
-                    if (t0Resolved) {
-                        // token1 以 token0 计价 = 1 / (token0 以 token1 计价)
-                        const token1PriceInToken0 = 1 / getPoolPrice();
+                    // 报价币定不出来，就先给基准币定价，再用当前池的兑换比例反推
+                    const t0 = await Pricing.resolveTokenUsdPrice(
+                        rpc, token0Info.address, token0Info.symbol, tag);
+                    if (t0) {
                         resolved = {
-                            price: token1PriceInToken0 * t0Resolved.price,
-                            source: `当前池反推（${token0Info.symbol} 定价来源: ${t0Resolved.source}）`
+                            price: (1 / getPoolPrice()) * t0.price,
+                            source: `当前池反推（${token0Info.symbol} 定价来源: ${t0.source}）`
                         };
                     }
                 }
 
                 if (resolved && isFinite(resolved.price) && resolved.price > 0) {
                     document.getElementById('token1UsdPrice').value = resolved.price.toPrecision(8);
-                    console.log(`✅ Token1 (${token1Info.symbol}) 美元价格: ${resolved.price}，来源: ${resolved.source}`);
+                    console.log(`✅ ${token1Info.symbol} 美元价格: ${resolved.price}，来源: ${resolved.source}`);
                     calculateMarketCap();
                 } else {
                     console.log(`⚠️ 无法自动确定 ${token1Info.symbol} 的美元价格，请手动输入`);
+                    setText('usdPriceHint', `⚠️ 没能自动定价 ${token1Info.symbol}，请手动填美元价`);
                 }
             } catch (error) {
-                console.error('❌ 自动获取Token1美元价格失败:', error);
-                // 失败也不影响用户手动输入
+                console.error('❌ 自动获取美元价格失败:', error);
+                setText('usdPriceHint', '⚠️ 自动定价失败: ' + error.message);
             }
         }
 
-        // 切换基准 token：对调 token0/token1 后重新渲染并重新自动定价
+        // ==================== 切换基准 ====================
+
         function flipTokens() {
-            if (!token0Info.address || !token1Info.address) return;
+            if (!adapter) return;
+            flipped = !flipped;
+            applyOrientation();
 
-            [token0Info, token1Info] = [token1Info, token0Info];
-            [token0, token1] = [token1, token0];
-            [reserve0, reserve1] = [reserve1, reserve0];
-            if (isV3 && v3Price) v3Price = 1 / v3Price;
-
-            // 清空依赖旧基准的输入与结果
             document.getElementById('token1UsdPrice').value = '';
             document.getElementById('targetMarketCap').value = '';
-            document.getElementById('requiredAmount').textContent = '-';
-            document.getElementById('targetMarketCapH').textContent = '-';
-            document.getElementById('targetMarketCapDiffPercent').textContent = '%';
+            setText('requiredAmount', '-');
+            setText('targetMarketCapH', '-');
+            setText('targetMarketCapDiffPercent', '%');
             document.getElementById('comparison').classList.add('hidden');
             document.getElementById('impactDisplay').classList.add('hidden');
 
@@ -855,232 +734,164 @@
                 `🔁 当前计算 ${token0Info.symbol} 市值（点击切换为 ${token1Info.symbol}）`;
         }
 
-        // 调整精度后的储备量
-        function getAdjustedReserve0() {
-            return parseFloat(reserve0) / Math.pow(10, parseInt(token0Info.decimals));
-        }
-        function getAdjustedReserve1() {
-            return parseFloat(reserve1) / Math.pow(10, parseInt(token1Info.decimals));
-        }
-        // Token0 以 Token1 计价（已做 decimals 换算）
-        function getPoolPrice() {
-            if (isV3 && v3Price) return v3Price;
-            return getAdjustedReserve1() / getAdjustedReserve0();
-        }
+        // ==================== 展示 ====================
 
-        // 显示池子信息
         function displayPoolInfo() {
-            // 显示Token0信息
-            document.getElementById('token0Name').textContent = token0Info.name;
-            document.getElementById('token0Symbol').textContent = token0Info.symbol;
-            document.getElementById('token0Address').textContent = token0Info.address;
-            document.getElementById('token0Decimals').textContent = `Decimals: ${token0Info.decimals}`;
-            
-            // 显示Token1信息
-            document.getElementById('token1Name').textContent = token1Info.name;
-            document.getElementById('token1Symbol').textContent = token1Info.symbol;
-            document.getElementById('token1Address').textContent = token1Info.address;
-            document.getElementById('token1Decimals').textContent = `Decimals: ${token1Info.decimals}`;
-            
-            // 使用实际的decimals计算显示值
-            const decimals0 = parseInt(token0Info.decimals);
-            const decimals1 = parseInt(token1Info.decimals);
-            
-            const reserve0Display = (reserve0 / Math.pow(10, decimals0)).toFixed(6);
-            const reserve1Display = (reserve1 / Math.pow(10, decimals1)).toFixed(6);
-            
-            document.getElementById('reserve0').textContent = reserve0Display + ' ' + token0Info.symbol;
-            document.getElementById('reserve1').textContent = reserve1Display + ' ' + token1Info.symbol;
-            document.getElementById('reserve0Raw').textContent = 'Raw: ' + reserve0;
-            document.getElementById('reserve1Raw').textContent = 'Raw: ' + reserve1;
+            setText('token0Name', token0Info.name);
+            setText('token0Symbol', token0Info.symbol);
+            setText('token0Address', token0Info.address);
+            setText('token0Decimals', `Decimals: ${token0Info.decimals}`);
 
-            // 计算价格 (Token0的价格，以Token1计价，已做 decimals 换算)
+            setText('token1Name', token1Info.name);
+            setText('token1Symbol', token1Info.symbol);
+            setText('token1Address', token1Info.address);
+            setText('token1Decimals', `Decimals: ${token1Info.decimals}`);
+
+            if (adapter.kind === 'v2') {
+                setText('reserve0', getAdjustedReserve0().toFixed(6) + ' ' + token0Info.symbol);
+                setText('reserve1', getAdjustedReserve1().toFixed(6) + ' ' + token1Info.symbol);
+                setText('reserve0Raw', 'Raw: ' + reserve0);
+                setText('reserve1Raw', 'Raw: ' + reserve1);
+            } else {
+                setText('reserve0', '（集中流动性池无储备量概念）');
+                setText('reserve1', '（价格与深度来自 tick 分布）');
+                setText('reserve0Raw', '');
+                setText('reserve1Raw', '');
+            }
+
             const price = getPoolPrice();
             const inversePrice = 1 / price;
 
-            document.getElementById('currentPrice').textContent = `Current Price: 1 ${token0Info.symbol} = ${price.toFixed(6)} ${token1Info.symbol}`;
-            document.getElementById('inversePrice').textContent = `Inverse Price: 1 ${token1Info.symbol} = ${inversePrice.toFixed(6)} ${token0Info.symbol}`;
-            document.getElementById('currentPriceHint').textContent = price.toFixed(6);
-            
-            // 更新Token1符号标签、池子类型标识和切换按钮文案
-            document.getElementById('token1SymbolLabel').textContent = token1Info.symbol;
-            document.getElementById('poolTypeBadge').textContent = isV3 ? '[V3 池，价格来自 slot0]' : '[V2 池]';
+            setText('currentPrice', `Current Price: 1 ${token0Info.symbol} = ${price.toPrecision(8)} ${token1Info.symbol}`);
+            setText('inversePrice', `Inverse Price: 1 ${token1Info.symbol} = ${inversePrice.toPrecision(8)} ${token0Info.symbol}`);
+            setText('currentPriceHint', price.toPrecision(8));
+
+            setText('token1SymbolLabel', token1Info.symbol);
+            setText('poolTypeBadge', poolTypeLabel());
             updateFlipButtonLabel();
-            
-            // 设置默认目标价格
-            document.getElementById('targetPrice').value = price.toFixed(6);
-            
-            // 触发一次市值计算来设置默认值
+
+            document.getElementById('targetPrice').value = price.toPrecision(8);
             calculateMarketCap();
         }
 
-        // 计算美元市值
+        function poolTypeLabel() {
+            if (!adapter) return '';
+            if (adapter.kind === 'v2') {
+                return `[V2 池 · 手续费 ${(adapter.feePips / 10000).toFixed(2)}%]`;
+            }
+            if (adapter.kind === 'v3') {
+                return `[V3 集中流动性 · fee ${adapter.state.feePips} · spacing ${adapter.state.tickSpacing}]`;
+            }
+            if (adapter.kind === 'v4') {
+                const hooked = adapter.poolKey.hooks &&
+                    adapter.poolKey.hooks.toLowerCase() !== ZERO_ADDRESS;
+                return `[V4 集中流动性 · lpFee ${adapter.state.lpFee} · spacing ${adapter.poolKey.tickSpacing}` +
+                    (hooked ? ' · ⚠ 带 hook]' : ']');
+            }
+            return '';
+        }
+
+        // ==================== 市值 ====================
+
         function calculateMarketCap() {
             const token1UsdPrice = parseFloat(document.getElementById('token1UsdPrice').value);
 
             if (!token1UsdPrice || token1UsdPrice <= 0) {
-                document.getElementById('token0UsdPrice').textContent = '-';
-                document.getElementById('token0PoolMarketCap').textContent = '-';
-                document.getElementById('token0TotalMarketCap').textContent = '-';
-                document.getElementById('token0TotalSupply').textContent = '-';
-                document.getElementById('poolPercentage').textContent = '-';
-                document.getElementById('currentMarketCapHint').textContent = '-';
+                setText('token0UsdPrice', '-');
+                setText('token0TotalMarketCap', '-');
+                setText('token0TotalSupply', '-');
+                setText('currentMarketCapHint', '-');
                 return;
             }
 
             const decimals0 = parseInt(token0Info.decimals);
-            const decimals1 = parseInt(token1Info.decimals);
-
-            // 计算Token0的价格（以Token1计价，已做 decimals 换算）
             const token0PriceInToken1 = getPoolPrice();
-            
-            // 计算Token0的美元价格
             const token0UsdPrice = token0PriceInToken1 * token1UsdPrice;
-            
-            // 计算Token0在池内的数量（真实数量）
-            const token0PoolAmount = parseFloat(reserve0) / Math.pow(10, decimals0);
-            
-            // 计算Token0的池内市值
-            const token0PoolMarketCap = token0PoolAmount * token0UsdPrice;
 
-            // 计算Token0的总供应量（真实数量）
             const token0TotalSupplyAmount = parseFloat(token0Info.totalSupply) / Math.pow(10, decimals0);
-            
-            // 计算Token0的总市值 (Fully Diluted Valuation)
             const token0TotalMarketCap = token0TotalSupplyAmount * token0UsdPrice;
 
-            // 计算池内占比
-            const poolPercentage = (token0PoolAmount / token0TotalSupplyAmount) * 100;
+            setText('token0UsdPrice', `USD Price: $${token0UsdPrice.toPrecision(8)}`);
+            setText('token0TotalMarketCap', fmtUsd(token0TotalMarketCap));
+            setText('token0TotalSupply', 'Total Supply: ' +
+                token0TotalSupplyAmount.toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' ' + token0Info.symbol);
+            setText('marketCapUnits', formatMarketCapUnits(token0TotalMarketCap));
+            setText('currentMarketCapHint', fmtUsd(token0TotalMarketCap));
 
-            // 显示结果
-            document.getElementById('token0UsdPrice').textContent = `USD Price: $${token0UsdPrice.toFixed(6)}`;
-            document.getElementById('token0PoolMarketCap').textContent = `$${token0PoolMarketCap.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-            document.getElementById('token0TotalMarketCap').textContent = `$${token0TotalMarketCap.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-            document.getElementById('token0TotalSupply').textContent = "Total Supply: " + token0TotalSupplyAmount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ' + token0Info.symbol;
-            document.getElementById('poolPercentage').textContent = poolPercentage.toFixed(2) + '%';
-            
-            // 更新市值单位换算显示
-            document.getElementById('marketCapUnits').textContent = formatMarketCapUnits(token0TotalMarketCap);
-            
-            // 更新当前市值提示
-            document.getElementById('currentMarketCapHint').textContent = '$' + token0TotalMarketCap.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-            
-            // 设置默认目标市值（仅在第一次或没有值时）
             if (!document.getElementById('targetMarketCap').value) {
                 document.getElementById('targetMarketCap').value = token0TotalMarketCap.toFixed(2);
             }
         }
 
-        // 格式化市值为K、M、B单位（只显示最大的单位）
         function formatMarketCapUnits(marketCap) {
             if (!marketCap || marketCap <= 0) return '-';
-            
-            const billion = marketCap / 1000000000;
-            const million = marketCap / 1000000;
-            const thousand = marketCap / 1000;
-            
-            // 只显示最大的单位，当不足1时才显示下一个较小的单位
-            if (billion >= 1) {
-                return `${billion.toFixed(2)}B`;
-            } else if (million >= 1) {
-                return `${million.toFixed(2)}M`;
-            } else if (thousand >= 1) {
-                return `${thousand.toFixed(2)}K`;
-            } else {
-                // 小于1000，显示原始值
-                return `$${marketCap.toFixed(2)}`;
-            }
+            const billion = marketCap / 1e9, million = marketCap / 1e6, thousand = marketCap / 1e3;
+            if (billion >= 1) return `${billion.toFixed(2)}B`;
+            if (million >= 1) return `${million.toFixed(2)}M`;
+            if (thousand >= 1) return `${thousand.toFixed(2)}K`;
+            return `$${marketCap.toFixed(2)}`;
         }
 
-        // 目标价格变化时的处理
+        function totalSupplyAmount() {
+            return parseFloat(token0Info.totalSupply) / Math.pow(10, parseInt(token0Info.decimals));
+        }
+
+        // ==================== 输入联动 ====================
+
         function onTargetPriceChange() {
             if (isUpdating) return;
-            
             const token1UsdPrice = parseFloat(document.getElementById('token1UsdPrice').value);
             const targetPrice = parseFloat(document.getElementById('targetPrice').value);
-            
-            if (!token1UsdPrice || token1UsdPrice <= 0) {
-                alert('请先输入 Token1 的美元价格！');
-                return;
-            }
-            
-            if (!targetPrice || targetPrice <= 0) {
-                updateByPrice();
-                return;
-            }
-            
-            // 计算对应的市值
-            const decimals0 = parseInt(token0Info.decimals);
-            const token0TotalSupplyAmount = parseFloat(token0Info.totalSupply) / Math.pow(10, decimals0);
-            const token0UsdPrice = targetPrice * token1UsdPrice;
-            const targetMarketCap = token0TotalSupplyAmount * token0UsdPrice;
-            
-            // 更新目标市值（防止循环）
+
+            if (!token1UsdPrice || token1UsdPrice <= 0) { alert('请先输入报价币的美元价格！'); return; }
+            if (!targetPrice || targetPrice <= 0) { scheduleSolve(); return; }
+
+            const targetMarketCap = totalSupplyAmount() * targetPrice * token1UsdPrice;
             isUpdating = true;
             document.getElementById('targetMarketCap').value = targetMarketCap.toFixed(2);
             isUpdating = false;
-            
-            // 更新计算
-            updateByPrice();
+            scheduleSolve();
         }
 
-        // 目标市值变化时的处理
         function onTargetMarketCapChange() {
             if (isUpdating) return;
-            
             const token1UsdPrice = parseFloat(document.getElementById('token1UsdPrice').value);
             const targetMarketCap = parseFloat(document.getElementById('targetMarketCap').value);
-            
-            if (!token1UsdPrice || token1UsdPrice <= 0) {
-                alert('请先输入 Token1 的美元价格！');
-                return;
-            }
-            
-            if (!targetMarketCap || targetMarketCap <= 0) {
-                updateByPrice();
-                return;
-            }
-            
-            // 计算对应的价格
-            const decimals0 = parseInt(token0Info.decimals);
-            const token0TotalSupplyAmount = parseFloat(token0Info.totalSupply) / Math.pow(10, decimals0);
-            const token0UsdPrice = targetMarketCap / token0TotalSupplyAmount;
-            const targetPrice = token0UsdPrice / token1UsdPrice;
-            
-            // 更新目标价格（防止循环）
+
+            if (!token1UsdPrice || token1UsdPrice <= 0) { alert('请先输入报价币的美元价格！'); return; }
+            if (!targetMarketCap || targetMarketCap <= 0) { scheduleSolve(); return; }
+
+            const targetPrice = (targetMarketCap / totalSupplyAmount()) / token1UsdPrice;
             isUpdating = true;
-            document.getElementById('targetPrice').value = targetPrice.toFixed(6);
+            document.getElementById('targetPrice').value = targetPrice.toPrecision(8);
             isUpdating = false;
-            
-            // 更新计算
-            updateByPrice();
+            scheduleSolve();
         }
 
-        // 快捷调整市值
         function adjustMarketCap(multiplier) {
             const currentValue = parseFloat(document.getElementById('targetMarketCap').value);
-            
-            if (!currentValue || currentValue <= 0) {
-                alert('请先设置一个目标市值！');
-                return;
-            }
-            
-            // 计算新的市值
-            const newValue = currentValue * multiplier;
-            
-            // 更新输入框
-            document.getElementById('targetMarketCap').value = newValue.toFixed(2);
-            
-            // 触发市值变化事件
+            if (!currentValue || currentValue <= 0) { alert('请先设置一个目标市值！'); return; }
+            document.getElementById('targetMarketCap').value = (currentValue * multiplier).toFixed(2);
             onTargetMarketCapChange();
         }
 
-        // 按目标价格计算
-        function updateByPrice() {
+        /** V3/V4 求解要打链上请求，做个防抖，避免每敲一个键就打一轮 RPC */
+        function scheduleSolve() {
+            if (!adapter) return;
+            if (adapter.kind === 'v2') { updateByPrice(); return; }
+            setText('requiredAmount', '计算中…');
+            if (solveTimer) clearTimeout(solveTimer);
+            solveTimer = setTimeout(updateByPrice, 350);
+        }
+
+        // ==================== 核心：求解所需资金 ====================
+
+        async function updateByPrice() {
+            if (!adapter) return;
             const targetPrice = parseFloat(document.getElementById('targetPrice').value);
 
             if (!targetPrice || targetPrice <= 0) {
-                document.getElementById('requiredAmount').textContent = '-';
+                setText('requiredAmount', '-');
                 document.getElementById('comparison').classList.add('hidden');
                 return;
             }
@@ -1088,93 +899,211 @@
             const currentPrice = getPoolPrice();
             const token1UsdPrice = parseFloat(document.getElementById('token1UsdPrice').value);
 
-            if (isV3) {
-                // V3 集中流动性池：恒定乘积公式不适用，无法用储备量推算买卖量
-                document.getElementById('requiredAmount').textContent = 'V3 集中流动性池，暂不支持买卖量计算';
-                document.getElementById('comparison').classList.add('hidden');
-            } else {
-                // 使用换算后的储备量（真实数量）做恒定乘积计算
-                // 根据恒定乘积公式: x * y = k
-                // 目标: y_new / x_new = targetPrice
-                // x_new = sqrt(x * y / targetPrice)
-                const r0 = getAdjustedReserve0();
-                const r1 = getAdjustedReserve1();
-                const k = r0 * r1;
-                const newReserve0 = Math.sqrt(k / targetPrice);
-                const newReserve1 = targetPrice * newReserve0;
-
-                let direction;
-                if (targetPrice > currentPrice) {
-                    // 需要买入 Token0 (使用 Token1)
-                    const amountIn = newReserve1 - r1;
-                    const amountInUsd = amountIn * token1UsdPrice;
-                    direction = `买入 ${(r0 - newReserve0).toFixed(6)} ${token0Info.symbol} (支付 ${amountIn.toFixed(6)} ${token1Info.symbol} = ${amountInUsd.toFixed(2)} USD)`;
-                } else {
-                    // 需要卖出 Token0 (获得 Token1)
-                    const amountIn = newReserve0 - r0;
-                    const amountOut = r1 - newReserve1;
-                    const amountOutUsd = amountOut * token1UsdPrice;
-                    direction = `卖出 ${amountIn.toFixed(6)} ${token0Info.symbol} (获得 ${amountOut.toFixed(6)} ${token1Info.symbol} = ${amountOutUsd.toFixed(2)} USD)`;
-                }
-
-                document.getElementById('requiredAmount').textContent = direction;
-
-                // 显示对比（全部使用换算后的真实数量）
-                showComparison(r0, r1, newReserve0, newReserve1);
-            }
-
+            // ---- 先更新与链上无关的部分（目标市值、价格影响） ----
             if (token1UsdPrice && token1UsdPrice > 0) {
-                const token0TotalSupplyAmount = parseFloat(token0Info.totalSupply) / Math.pow(10, decimals0);
-                const token0UsdPrice = targetPrice * token1UsdPrice;
-                const targetMarketCap = token0TotalSupplyAmount * token0UsdPrice;
-                
-                // 计算当前市值
-                const currentToken0UsdPrice = currentPrice * token1UsdPrice;
-                const currentMarketCap = token0TotalSupplyAmount * currentToken0UsdPrice;
-                
-                // 计算百分比变化（相对于当前市值）
+                const supply = totalSupplyAmount();
+                const targetMarketCap = supply * targetPrice * token1UsdPrice;
+                const currentMarketCap = supply * currentPrice * token1UsdPrice;
                 const marketCapChangePercent = (targetMarketCap / currentMarketCap) * 100 - 100;
-                
-                // 更新目标市值显示
-                document.getElementById('targetMarketCapH').textContent = formatMarketCapUnits(targetMarketCap);
-                
-                // 更新百分比显示并添加颜色
+
+                setText('targetMarketCapH', formatMarketCapUnits(targetMarketCap));
                 const percentElement = document.getElementById('targetMarketCapDiffPercent');
                 percentElement.textContent = marketCapChangePercent.toFixed(2) + '%';
-                
-                // 根据百分比添加颜色
-                if (marketCapChangePercent < 0) {
-                    percentElement.style.color = '#e74c3c'; // 红色
-                } else if (marketCapChangePercent > 0) {
-                    percentElement.style.color = '#27ae60'; // 绿色
-                } else {
-                    percentElement.style.color = '#95a5a6'; // 灰色（等于100%）
-                }
+                percentElement.style.color = marketCapChangePercent < 0 ? '#e74c3c'
+                    : marketCapChangePercent > 0 ? '#27ae60' : '#95a5a6';
             }
 
-            // 计算价格影响
             const priceImpact = ((targetPrice - currentPrice) / currentPrice * 100);
-            document.getElementById('priceImpact').textContent = Math.abs(priceImpact).toFixed(2) + '%';
-            
+            setText('priceImpact', Math.abs(priceImpact).toFixed(2) + '%');
             const impactDisplay = document.getElementById('impactDisplay');
             impactDisplay.classList.remove('hidden', 'high');
-            if (Math.abs(priceImpact) > 5) {
-                impactDisplay.classList.add('high');
+            if (Math.abs(priceImpact) > 5) impactDisplay.classList.add('high');
+
+            // ---- 求解 ----
+            const seq = ++solveSeq;
+            let r;
+            try {
+                // adapter 内部始终用链上顺序，flip 之后目标价要取倒数
+                const adapterTarget = flipped ? 1 / targetPrice : targetPrice;
+                r = await adapter.solveToPrice(adapterTarget);
+            } catch (e) {
+                if (seq !== solveSeq) return;
+                console.error('求解失败:', e);
+                setText('requiredAmount', '求解失败: ' + e.message);
+                document.getElementById('comparison').classList.add('hidden');
+                return;
+            }
+            if (seq !== solveSeq) return;   // 有更新的请求了，丢弃这次结果
+
+            if (!r || !r.ok) {
+                setText('requiredAmount', '求解失败: ' + ((r && r.error) || '未知原因'));
+                document.getElementById('comparison').classList.add('hidden');
+                return;
+            }
+
+            if (!r.reached) {
+                setText('requiredAmount',
+                    `该池深度不足以到达目标价格（已扫描 ${r.ticksCrossed} 个 tick 仍未走到）。` +
+                    `说明这个池子撑不起这个市值，需要看其他场地或调低目标。`);
+                document.getElementById('comparison').classList.add('hidden');
+                return;
+            }
+
+            // ---- 把链上口径映射回用户口径 ----
+            // 报价币就是展示口径里的 token1Info
+            const quoteAddr = String(token1Info.address).toLowerCase();
+            const inIsQuote = String(r.tokenInAddress).toLowerCase() === quoteAddr;
+            const quoteFlow = inIsQuote ? r.amountIn : -r.amountOut;   // 正=流入 负=流出
+            const baseAmount = inIsQuote ? r.amountOut : r.amountIn;
+
+            const usd = (token1UsdPrice && token1UsdPrice > 0)
+                ? ` ≈ ${fmtUsd(Math.abs(quoteFlow) * token1UsdPrice)}` : '';
+
+            const verb = quoteFlow >= 0 ? '买入' : '卖出';
+            const flowWord = quoteFlow >= 0 ? '资金净流入' : '资金净流出';
+
+            let text = `${flowWord} ${fmtAmount(quoteFlow)} ${token1Info.symbol}${usd}` +
+                `（${verb} ${fmtAmount(baseAmount)} ${token0Info.symbol}，` +
+                `手续费 ${fmtAmount(r.feePaid)} ${r.tokenIn}）`;
+
+            if (adapter.kind !== 'v2') text += ` · 跨越 ${r.ticksCrossed} 个 tick`;
+            if (r.exhausted) text += ' ⚠ 目标价之外已无流动性，该数字会被套利立刻拉回，无实际意义';
+            if (r.incomplete) text += ' ⚠ 部分链上数据未读回，结果可能偏小，请重试';
+            if (r.note) text += ' ⚠' + r.note;
+
+            setText('requiredAmount', text);
+            showComparison(r);
+        }
+
+        // ==================== 多池汇总 ====================
+
+        let aggRunning = false;
+
+        async function runAggregate() {
+            if (!adapter || aggRunning) return;
+
+            const token1UsdPrice = parseFloat(document.getElementById('token1UsdPrice').value);
+            const targetMarketCap = parseFloat(document.getElementById('targetMarketCap').value);
+            if (!token1UsdPrice || token1UsdPrice <= 0) { alert('请先确定报价币的美元价格！'); return; }
+            if (!targetMarketCap || targetMarketCap <= 0) { alert('请先填一个目标市值！'); return; }
+
+            const supply = totalSupplyAmount();
+            if (!(supply > 0)) { alert('读不到该 token 的总供应量，无法按市值汇总'); return; }
+            const targetUsdPrice = targetMarketCap / supply;
+
+            const btn = document.getElementById('aggBtn');
+            aggRunning = true;
+            btn.disabled = true;
+            document.getElementById('aggregate').classList.remove('hidden');
+            document.getElementById('aggRows').innerHTML = '';
+            setText('aggTotal', '-');
+            setText('aggCompare', '-');
+
+            try {
+                const res = await Aggregate.aggregate(
+                    document.getElementById('rpcUrl').value.trim(),
+                    token0Info,
+                    targetUsdPrice,
+                    {
+                        rpc: adapter.rpc,
+                        blockTag: adapter.blockTag,
+                        onProgress: m => setText('aggMeta', m)
+                    }
+                );
+                renderAggregate(res, targetUsdPrice);
+            } catch (e) {
+                console.error('汇总失败:', e);
+                setText('aggMeta', '汇总失败: ' + e.message);
+            } finally {
+                aggRunning = false;
+                btn.disabled = false;
             }
         }
 
-        // 显示对比（参数均为换算后的真实数量）
-        function showComparison(oldR0, oldR1, newR0, newR1) {
-            document.getElementById('beforeReserve0').textContent = oldR0.toFixed(6) + ' ' + token0Info.symbol;
-            document.getElementById('beforeReserve1').textContent = oldR1.toFixed(6) + ' ' + token1Info.symbol;
-            document.getElementById('beforePrice').textContent = (oldR1 / oldR0).toFixed(6) + ' ' + token1Info.symbol;
-            document.getElementById('beforeK').textContent = (oldR0 * oldR1).toExponential(4);
+        function renderAggregate(res, targetUsdPrice) {
+            setText('aggMeta',
+                `目标价 $${targetUsdPrice.toPrecision(6)} / ${token0Info.symbol} · ` +
+                `扫到 ${res.scanned} 个池，求解 ${res.solved} 个，跳过 ${res.skipped} 个（深度过小或无法定价）· ` +
+                `区块 ${Number(BigInt(res.blockTag))}`);
 
-            document.getElementById('afterReserve0').textContent = newR0.toFixed(6) + ' ' + token0Info.symbol;
-            document.getElementById('afterReserve1').textContent = newR1.toFixed(6) + ' ' + token1Info.symbol;
-            document.getElementById('afterPrice').textContent = (newR1 / newR0).toFixed(6) + ' ' + token1Info.symbol;
-            document.getElementById('afterK').textContent = (newR0 * newR1).toExponential(4);
+            const inflow = res.totalUsd >= 0;
+            setText('aggTotal', (inflow ? '净流入 ' : '净流出 ') + fmtUsd(res.totalUsd));
 
+            const counted = res.rows.filter(r => r.counted);
+            const biggest = counted.length ? Math.abs(counted[0].usd) : 0;
+            setText('aggCompare', biggest > 0
+                ? `最大单池 ${fmtUsd(biggest)}，汇总是它的 ${(Math.abs(res.totalUsd) / biggest).toFixed(2)} 倍`
+                : '没有可计入的池子');
+
+            const tbody = document.getElementById('aggRows');
+            tbody.innerHTML = '';
+            for (const r of res.rows) {
+                const tr = document.createElement('tr');
+                tr.style.borderBottom = '1px solid #eee';
+                if (!r.counted) tr.style.opacity = '0.55';
+
+                const notes = [];
+                if (r.error) notes.push('错误: ' + r.error);
+                if (r.reached === false) notes.push('深度不足');
+                if (r.exhausted) notes.push('流动性耗尽');
+                if (r.incomplete) notes.push('数据不全');
+                if (r.hasHooks) notes.push('带 hook');
+
+                const cells = [
+                    r.kind.toUpperCase(),
+                    r.factory,
+                    r.pair || '-',
+                    r.fee !== undefined ? (r.fee / 10000).toFixed(2) + '%' : '-',
+                    r.spotBaseUsd !== undefined ? '$' + r.spotBaseUsd.toPrecision(6) : '-',
+                    r.usd !== undefined && isFinite(r.usd)
+                        ? (r.usd >= 0 ? '+' : '−') + fmtUsd(r.usd) : '-',
+                    notes.join('、') || ''
+                ];
+                cells.forEach((c, i) => {
+                    const td = document.createElement('td');
+                    td.style.padding = '9px 10px';
+                    if (i >= 3 && i <= 5) td.style.textAlign = 'right';
+                    if (i === 5 && r.counted) {
+                        td.style.fontWeight = '600';
+                        td.style.color = r.usd >= 0 ? '#27ae60' : '#e74c3c';
+                    }
+                    if (i === 6) td.style.color = '#e67e22';
+                    td.textContent = c;
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            }
+        }
+
+        // ==================== 交易前后对比 ====================
+
+        function showComparison(r) {
+            const before = flipped ? 1 / r.priceBefore : r.priceBefore;
+            const after = flipped ? 1 / r.priceAfter : r.priceAfter;
+
+            if (adapter.kind === 'v2' && r.newReserve0 !== undefined) {
+                const oldR0 = getAdjustedReserve0(), oldR1 = getAdjustedReserve1();
+                const newR0 = flipped ? r.newReserve1 : r.newReserve0;
+                const newR1 = flipped ? r.newReserve0 : r.newReserve1;
+
+                setText('beforeReserve0', oldR0.toFixed(6) + ' ' + token0Info.symbol);
+                setText('beforeReserve1', oldR1.toFixed(6) + ' ' + token1Info.symbol);
+                setText('afterReserve0', newR0.toFixed(6) + ' ' + token0Info.symbol);
+                setText('afterReserve1', newR1.toFixed(6) + ' ' + token1Info.symbol);
+                setText('beforeK', (oldR0 * oldR1).toExponential(4));
+                setText('afterK', (newR0 * newR1).toExponential(4));
+            } else {
+                // 集中流动性池没有储备量，改成展示更有意义的深度信息
+                setText('beforeReserve0', '活跃流动性 L: ' + String(adapter.state.liquidity));
+                setText('beforeReserve1', '当前 tick: ' + adapter.state.tick);
+                setText('afterReserve0', '跨越 tick 数: ' + r.ticksCrossed);
+                setText('afterReserve1', '手续费率: ' + (r.feePips / 10000).toFixed(4) + '%');
+                setText('beforeK', '');
+                setText('afterK', '');
+            }
+
+            setText('beforePrice', before.toPrecision(8) + ' ' + token1Info.symbol);
+            setText('afterPrice', after.toPrecision(8) + ' ' + token1Info.symbol);
             document.getElementById('comparison').classList.remove('hidden');
         }
     </script>
