@@ -182,6 +182,47 @@ async function runCase(page, label, setup) {
                 id === '0x26b9ede57158097cb1c2688a5be7383acda1f67d75199fe88bfe58079ed359bc', id);
         });
 
+        // 多池汇总：在 V3 池上跑一遍（CAKE 这种主流币场地多，能真正考验聚合）
+        console.log('\n── 多池汇总 ─────────────────────────────────');
+        await page.goto(`http://localhost:${PORT}/index.html`, { waitUntil: 'domcontentloaded' });
+        await page.fill('#rpcUrl', `http://localhost:${PORT}/rpc`);
+        await page.fill('#poolAddress', '0x133b3d95bad5405d14d53473671200e9342896bf'); // Pancake V3 CAKE/WBNB
+        await page.click('button:has-text("加载池子信息")');
+        await page.waitForSelector('#poolInfo:not(.hidden)', { timeout: 90000 });
+        await page.waitForFunction(
+            () => document.getElementById('targetMarketCap').value !== '', null, { timeout: 60000 }
+        ).catch(() => {});
+        await page.click('button:has-text("+10%")');
+        await page.waitForFunction(() => {
+            const t = document.getElementById('requiredAmount').textContent;
+            return t && t !== '-' && t !== '计算中…';
+        }, null, { timeout: 90000 }).catch(() => {});
+
+        const singleText = (await page.textContent('#requiredAmount')).trim();
+        console.log(`  单池: ${singleText.slice(0, 90)}`);
+
+        await page.click('#aggBtn');
+        // 汇总要扫几十个池子再逐个求解，给足时间
+        await page.waitForFunction(
+            () => document.getElementById('aggTotal').textContent !== '-',
+            null, { timeout: 300000 }).catch(() => {});
+
+        const aggTotal = (await page.textContent('#aggTotal')).trim();
+        const aggMeta = (await page.textContent('#aggMeta')).trim();
+        const aggCompare = (await page.textContent('#aggCompare')).trim();
+        const rowCount = await page.evaluate(() => document.querySelectorAll('#aggRows tr').length);
+        console.log(`  ${aggMeta}`);
+        console.log(`  汇总: ${aggTotal}`);
+        console.log(`  ${aggCompare}`);
+        console.log(`  表格行数: ${rowCount}`);
+
+        check('汇总出总额', /净流入|净流出/.test(aggTotal) && aggTotal !== '-');
+        check('列出了多个池子', rowCount >= 3, `${rowCount} 行`);
+        // 聚合必须严格大于任一单池，否则说明没真的把多个场地加起来
+        check('汇总 > 最大单池', /倍/.test(aggCompare) &&
+            parseFloat((aggCompare.match(/的 ([\d.]+) 倍/) || [])[1]) > 1,
+            aggCompare);
+
         // 切换基准也要能正常重算
         console.log('\n── 切换基准 ─────────────────────────────────');
         await page.click('#flipButton');

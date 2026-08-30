@@ -423,6 +423,12 @@
                     <h3>要达到 <span id="targetMarketCapH">-</span> <span id="targetMarketCapDiffPercent">%</span> 市值</h3>
                     <h3>需要</h3>
                     <p id="requiredAmount">-</p>
+                    <div class="small-text" style="margin-top: 8px;">以上只是这一个池子。单池会被套利拉回，实际成本要看全部场地 ↓</div>
+                    <button onclick="runAggregate()" id="aggBtn"
+                        style="margin-top: 12px; padding: 10px; font-size: 14px;
+                               background: linear-gradient(135deg, #16a085 0%, #138d75 100%);">
+                        🌐 汇总全部池子（V2 + V3 + V4）
+                    </button>
                 </div>
             </div>
 
@@ -430,6 +436,41 @@
             <div id="impactDisplay" class="impact hidden">
                 <strong>价格影响: <span id="priceImpact">0%</span></strong>
             </div>
+            </div>
+        </div>
+
+        <!-- 多池汇总 -->
+        <div id="aggregate" class="card hidden">
+            <h2 style="margin-bottom: 10px;">🌐 全部池子汇总</h2>
+            <div class="small-text" id="aggMeta" style="margin-bottom: 15px;">-</div>
+
+            <div class="info-box" style="margin-bottom: 20px; padding: 20px;">
+                <h3>把所有场地都推到目标价，合计需要</h3>
+                <p id="aggTotal" style="font-size: 28px;">-</p>
+                <div class="small-text" id="aggCompare" style="margin-top: 8px;">-</div>
+            </div>
+
+            <div style="overflow-x: auto;">
+                <table id="aggTable" style="width: 100%; border-collapse: collapse; font-size: 13px; min-width: 700px;">
+                    <thead>
+                        <tr style="background: #f5f7fa; text-align: left;">
+                            <th style="padding: 10px; border-bottom: 2px solid #e0e0e0;">类型</th>
+                            <th style="padding: 10px; border-bottom: 2px solid #e0e0e0;">场地</th>
+                            <th style="padding: 10px; border-bottom: 2px solid #e0e0e0;">交易对</th>
+                            <th style="padding: 10px; border-bottom: 2px solid #e0e0e0; text-align: right;">费率</th>
+                            <th style="padding: 10px; border-bottom: 2px solid #e0e0e0; text-align: right;">池内现价</th>
+                            <th style="padding: 10px; border-bottom: 2px solid #e0e0e0; text-align: right;">所需资金</th>
+                            <th style="padding: 10px; border-bottom: 2px solid #e0e0e0;">备注</th>
+                        </tr>
+                    </thead>
+                    <tbody id="aggRows"></tbody>
+                </table>
+            </div>
+
+            <div class="small-text" style="margin-top: 15px; line-height: 1.7;">
+                只覆盖已配置工厂上的池子（PancakeSwap V2/V3、Uniswap V2/V3/V4、Biswap V2），
+                CEX 与未收录的 DEX 不在内，所以这仍是下界。
+                V4 靠扫最近区块的 Initialize 事件发现，受 RPC 的 getLogs 上限限制，可能漏掉老池子。
             </div>
         </div>
 
@@ -490,6 +531,7 @@
     <script src="src/pricing.js"></script>
     <script src="src/clsolver.js"></script>
     <script src="src/adapters.js"></script>
+    <script src="src/aggregate.js"></script>
 
     <script>
         // ==================== 全局状态 ====================
@@ -931,6 +973,106 @@
 
             setText('requiredAmount', text);
             showComparison(r);
+        }
+
+        // ==================== 多池汇总 ====================
+
+        let aggRunning = false;
+
+        async function runAggregate() {
+            if (!adapter || aggRunning) return;
+
+            const token1UsdPrice = parseFloat(document.getElementById('token1UsdPrice').value);
+            const targetMarketCap = parseFloat(document.getElementById('targetMarketCap').value);
+            if (!token1UsdPrice || token1UsdPrice <= 0) { alert('请先确定报价币的美元价格！'); return; }
+            if (!targetMarketCap || targetMarketCap <= 0) { alert('请先填一个目标市值！'); return; }
+
+            const supply = totalSupplyAmount();
+            if (!(supply > 0)) { alert('读不到该 token 的总供应量，无法按市值汇总'); return; }
+            const targetUsdPrice = targetMarketCap / supply;
+
+            const btn = document.getElementById('aggBtn');
+            aggRunning = true;
+            btn.disabled = true;
+            document.getElementById('aggregate').classList.remove('hidden');
+            document.getElementById('aggRows').innerHTML = '';
+            setText('aggTotal', '-');
+            setText('aggCompare', '-');
+
+            try {
+                const res = await Aggregate.aggregate(
+                    document.getElementById('rpcUrl').value.trim(),
+                    token0Info,
+                    targetUsdPrice,
+                    {
+                        rpc: adapter.rpc,
+                        blockTag: adapter.blockTag,
+                        onProgress: m => setText('aggMeta', m)
+                    }
+                );
+                renderAggregate(res, targetUsdPrice);
+            } catch (e) {
+                console.error('汇总失败:', e);
+                setText('aggMeta', '汇总失败: ' + e.message);
+            } finally {
+                aggRunning = false;
+                btn.disabled = false;
+            }
+        }
+
+        function renderAggregate(res, targetUsdPrice) {
+            setText('aggMeta',
+                `目标价 $${targetUsdPrice.toPrecision(6)} / ${token0Info.symbol} · ` +
+                `扫到 ${res.scanned} 个池，求解 ${res.solved} 个，跳过 ${res.skipped} 个（深度过小或无法定价）· ` +
+                `区块 ${Number(BigInt(res.blockTag))}`);
+
+            const inflow = res.totalUsd >= 0;
+            setText('aggTotal', (inflow ? '净流入 ' : '净流出 ') + fmtUsd(res.totalUsd));
+
+            const counted = res.rows.filter(r => r.counted);
+            const biggest = counted.length ? Math.abs(counted[0].usd) : 0;
+            setText('aggCompare', biggest > 0
+                ? `最大单池 ${fmtUsd(biggest)}，汇总是它的 ${(Math.abs(res.totalUsd) / biggest).toFixed(2)} 倍`
+                : '没有可计入的池子');
+
+            const tbody = document.getElementById('aggRows');
+            tbody.innerHTML = '';
+            for (const r of res.rows) {
+                const tr = document.createElement('tr');
+                tr.style.borderBottom = '1px solid #eee';
+                if (!r.counted) tr.style.opacity = '0.55';
+
+                const notes = [];
+                if (r.error) notes.push('错误: ' + r.error);
+                if (r.reached === false) notes.push('深度不足');
+                if (r.exhausted) notes.push('流动性耗尽');
+                if (r.incomplete) notes.push('数据不全');
+                if (r.hasHooks) notes.push('带 hook');
+
+                const cells = [
+                    r.kind.toUpperCase(),
+                    r.factory,
+                    r.pair || '-',
+                    r.fee !== undefined ? (r.fee / 10000).toFixed(2) + '%' : '-',
+                    r.spotBaseUsd !== undefined ? '$' + r.spotBaseUsd.toPrecision(6) : '-',
+                    r.usd !== undefined && isFinite(r.usd)
+                        ? (r.usd >= 0 ? '+' : '−') + fmtUsd(r.usd) : '-',
+                    notes.join('、') || ''
+                ];
+                cells.forEach((c, i) => {
+                    const td = document.createElement('td');
+                    td.style.padding = '9px 10px';
+                    if (i >= 3 && i <= 5) td.style.textAlign = 'right';
+                    if (i === 5 && r.counted) {
+                        td.style.fontWeight = '600';
+                        td.style.color = r.usd >= 0 ? '#27ae60' : '#e74c3c';
+                    }
+                    if (i === 6) td.style.color = '#e67e22';
+                    td.textContent = c;
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            }
         }
 
         // ==================== 交易前后对比 ====================

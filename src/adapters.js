@@ -454,12 +454,14 @@
     /**
      * @param rpcUrl  RPC 地址
      * @param input   池子地址（V2/V3）或 poolId（V4）
-     * @param opts    { poolKey, v2FeePips, nativeSymbol }
+     * @param opts    { poolKey, v2FeePips, nativeSymbol, rpc, blockTag }
+     *                批量扫池子时可以传入已有的 rpc 与 blockTag，
+     *                这样所有池子读的是同一个区块快照，横向加总才有意义
      */
     async function createAdapter(rpcUrl, input, opts) {
         const o = opts || {};
-        const rpc = new Rpc.RpcClient(rpcUrl);
-        const blockTag = await rpc.blockNumber();   // 固定区块，保证所有读取是同一个快照
+        const rpc = o.rpc || new Rpc.RpcClient(rpcUrl);
+        const blockTag = o.blockTag || await rpc.blockNumber();   // 固定区块，保证所有读取是同一个快照
         const target = String(input || '').trim();
 
         // ---- V4：poolId 或显式 PoolKey ----

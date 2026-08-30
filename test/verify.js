@@ -189,11 +189,14 @@ async function findLiveV4Pool(rpc, blockTag) {
 async function verifyV4() {
     console.log('\n\u2500\u2500 V4 (Uniswap V4 on BSC) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500');
     const rpc = new Rpc.RpcClient(RPC_URL);
-    const blockTag = await rpc.blockNumber();
 
-    // poolId 推导必须和链上 Initialize 事件里的 id 完全一致
-    const live = await findLiveV4Pool(rpc, blockTag);
+    // 先扫日志找池子（这一步要几十秒），扫完再取区块快照。
+    // 否则等求解跑起来时，公共 RPC 对这个已经偏旧的区块可能给不出一致的状态，
+    // 在活跃池子上会表现为莫名其妙的偏差。
+    const live = await findLiveV4Pool(rpc, await rpc.blockNumber());
     if (!live) { console.log('  跳过：最近区块里没找到有流动性的无 hook V4 池'); return; }
+
+    const blockTag = await rpc.blockNumber();
 
     const key = live.key;
     const computed = PoolAdapters.computePoolId(key).toLowerCase();
